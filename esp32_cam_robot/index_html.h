@@ -12,6 +12,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>ESP32 Robot</title>
 <style>
+  :root{--R:85px;--K:76px}   /* zakres ruchu i rozmiar gałki – JS dopasowuje je do ekranu */
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
   html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#fff;
     font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;touch-action:none}
@@ -45,23 +46,24 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     background:rgba(255,255,255,.1);color:#fff;font-size:12px}
   .quality button.on{background:rgba(80,170,255,.85);border-color:#6bf}
   /* dwie strefy: lewa połowa = gaz, prawa = skręt; gałka pojawia się pod palcem */
-  .zone{position:fixed;top:60px;bottom:0;width:50%}
+  .zone{position:fixed;top:0;bottom:0;width:50%}
   #zl{left:0} #zr{right:0}
-  .base{position:absolute;border-radius:48px;border:3px solid rgba(255,255,255,.55);
+  .base{position:absolute;border-radius:999px;border:3px solid rgba(255,255,255,.55);
     background:rgba(255,255,255,.07);transform:translate(-50%,-50%);pointer-events:none;transition:opacity .2s}
-  .base.v{width:92px;height:250px} .base.h{width:250px;height:92px}
-  .base::after{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:11px;
-    color:rgba(255,255,255,.5);letter-spacing:.08em;white-space:nowrap}
-  .base.v::after{content:"GAZ"} .base.h::after{content:"SKRĘT"}
-  .knob{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;
+  .base.v{width:calc(var(--K) + 14px);height:calc(2 * var(--R) + var(--K) + 14px)}
+  .base.h{width:calc(2 * var(--R) + var(--K) + 14px);height:calc(var(--K) + 14px)}
+  .base::before,.base::after{position:absolute;font-size:12px;line-height:1;color:rgba(255,255,255,.6)}
+  .base.v::before{content:"\25B2";top:7px;left:50%;transform:translateX(-50%)}
+  .base.v::after{content:"\25BC";bottom:7px;left:50%;transform:translateX(-50%)}
+  .base.h::before{content:"\25C0";left:9px;top:50%;transform:translateY(-50%)}
+  .base.h::after{content:"\25B6";right:9px;top:50%;transform:translateY(-50%)}
+  .knob{position:absolute;left:50%;top:50%;width:var(--K);height:var(--K);margin:calc(var(--K) / -2) 0 0 calc(var(--K) / -2);
     border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff,#9ad 70%);
     box-shadow:0 2px 10px rgba(0,0,0,.6);opacity:.9;z-index:1}
   #hint{position:fixed;bottom:10px;right:10px;font-size:11px;color:#bbb}
   @media (pointer:coarse){#hint{display:none}}
   @media (orientation:portrait){
     #top{top:56px}
-    .zone{top:110px}
-    .base.h{width:180px}
   }
 </style>
 </head>
@@ -161,13 +163,25 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
   // ---------- dwie gałki ----------
   // axis 'y' = gaz (góra/dół), axis 'x' = skręt (lewo/prawo)
+  // rozmiar gałek dopasowany do ekranu (w poziomie telefon ma czasem tylko ~250 px wysokości)
+  var KNOB = 76;
+  function layoutSticks(){
+    var h = window.innerHeight, w = window.innerWidth / 2;
+    KNOB = h < 340 ? 60 : 76;
+    RADIUS = Math.max(36, Math.min(85, Math.floor((Math.min(h, w) - KNOB - 30) / 2)));
+    document.documentElement.style.setProperty('--R', RADIUS + 'px');
+    document.documentElement.style.setProperty('--K', KNOB + 'px');
+  }
+  layoutSticks();
+  window.addEventListener('resize', layoutSticks);
+
   function makeStick(zone, axis){
     var base = zone.querySelector('.base'), knob = zone.querySelector('.knob');
     var st = { id: null, c: 0, v: 0, edge: false };
     function home(){
       var r = zone.getBoundingClientRect();
       base.style.left = (r.width / 2) + 'px';
-      base.style.top = (r.height * 0.55) + 'px';
+      base.style.top = (r.height / 2) + 'px';
       base.style.opacity = '.55';
     }
     function move(e){
@@ -194,7 +208,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       try { zone.setPointerCapture(e.pointerId); } catch (err) {}
       var r = zone.getBoundingClientRect();
       // środek toru pod palcem, ale przesunięty tak, żeby cały tor mieścił się na ekranie
-      var m = RADIUS + 40, cx = e.clientX, cy = e.clientY;
+      var m = RADIUS + KNOB / 2 + 10, cx = e.clientX, cy = e.clientY;
       if (axis === 'y') cy = Math.max(r.top + m, Math.min(window.innerHeight - m, cy));
       else cx = Math.max(r.left + m, Math.min(r.right - m, cx));
       st.c = axis === 'y' ? cy : cx;                 // gałka pojawia się pod palcem
