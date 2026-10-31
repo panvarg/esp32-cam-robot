@@ -3,7 +3,7 @@ Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu
 ## Co potrafi
 
 - własna sieć Wi-Fi **`ESP32-Robot`** (hasło `robot1234`), strona sterowania pod **http://192.168.4.1**
-- wirtualny analog jak w grach, regulacja mocy 20–100%, włącznik diody flash
+- dwie gałki jak w grach (lewa: gaz, prawa: skręt), regulacja mocy 20–100%, włącznik diody flash
 - podgląd z kamery z wyborem jakości: **Płynnie** (320×240) / **Balans** (640×480) / **Jakość** (800×600)
 - napęd 2WD lub 4WD (skręt czołgowy), opcjonalnie dwa L298N
 - odbiornik **ELRS (CRSF)** na GPIO 2: aparatura przejmuje sterowanie po włączeniu AUX1, a po utracie zasięgu wraca telefon

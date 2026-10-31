@@ -8,8 +8,8 @@ Robot sterowany z telefonu przez przeglądarkę: obraz z kamery na pełnym ekran
 
 - ESP32 tworzy własną sieć Wi-Fi **`ESP32-Robot`** (hasło `robot1234`).
 - Na telefonie łączysz się z tą siecią i otwierasz **http://192.168.4.1**.
-- Lewa część ekranu to analog. Dotknij w dowolnym miejscu, a gałka pojawi się pod palcem. Przód/tył to jazda, lewo/prawo to skręt; przy wychyleniu w samo lewo lub prawo robot obraca się w miejscu.
-- Po prawej są przycisk światła (dioda flash) i regulacja mocy (20–100%).
+- Sterujesz dwoma kciukami, jak w grach wyścigowych. **Lewa połowa ekranu to gaz** (góra = przód, dół = tył), **prawa połowa to skręt** (lewo/prawo). Gałka pojawia się tam, gdzie dotkniesz. Skręt bez gazu obraca robota w miejscu.
+- Na górze ekranu są przycisk światła (dioda flash) i regulacja mocy (20–100%).
 - W prawym górnym rogu wybierasz jakość obrazu. Wybór jest zapamiętywany w przeglądarce:
   - **Płynnie**: 320×240, najwięcej klatek i najmniejsze opóźnienie, najlepsze do szybkiej jazdy
   - **Balans**: 640×480 (domyślnie)

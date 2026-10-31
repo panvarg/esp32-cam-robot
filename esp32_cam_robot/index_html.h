@@ -1,6 +1,7 @@
 #pragma once
 
-// Strona sterowania: podgląd z kamery na całym ekranie + wirtualny analog.
+// Strona sterowania: podgląd z kamery na całym ekranie + dwie wirtualne gałki
+// (lewa = gaz przód/tył, prawa = skręt lewo/prawo), jak w grach wyścigowych.
 // Trzymaj telefon poziomo. Na komputerze działa też WASD / strzałki, F = światło.
 static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <html lang="pl">
@@ -22,39 +23,45 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   #status{top:10px;left:10px;display:flex;align-items:center;gap:6px}
   #dot{width:10px;height:10px;border-radius:50%;background:#e33;box-shadow:0 0 6px #e33}
   #dot.ok{background:#2d6;box-shadow:0 0 6px #2d6}
-  #rc{top:52px;left:10px;display:none}
+  #rc{top:52px;left:10px;display:none;z-index:2}
   #rc.on{display:block;color:#fd5}
   #rc.armed{display:block;color:#000;background:rgba(80,220,120,.9)}
-  #zone.locked{opacity:.3}
+  .zone.locked{opacity:.3}
   #readout{bottom:10px;left:50%;transform:translateX(-50%);font-variant-numeric:tabular-nums}
-  #side{position:fixed;right:16px;top:50%;transform:translateY(-50%);display:flex;
-    flex-direction:column;gap:14px;align-items:center}
-  .btn{width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.5);
-    background:rgba(0,0,0,.4);color:#fff;font-size:26px;display:flex;align-items:center;
+  #top{position:fixed;top:8px;left:50%;transform:translateX(-50%);display:flex;gap:8px;
+    align-items:center;z-index:2}
+  .btn{width:44px;height:44px;border-radius:50%;border:2px solid rgba(255,255,255,.5);
+    background:rgba(0,0,0,.45);color:#fff;font-size:20px;display:flex;align-items:center;
     justify-content:center;cursor:pointer}
   .btn.on{background:rgba(255,220,80,.85);color:#000;border-color:#fd5}
-  .speed{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;
-    background:rgba(0,0,0,.4);padding:8px 6px;border-radius:12px}
-  .speed button{width:44px;height:36px;border-radius:8px;border:1px solid rgba(255,255,255,.4);
+  .speed{display:flex;align-items:center;gap:6px;font-size:12px;
+    background:rgba(0,0,0,.45);padding:4px;border-radius:12px}
+  .speed button{width:40px;height:36px;border-radius:8px;border:1px solid rgba(255,255,255,.4);
     background:rgba(255,255,255,.1);color:#fff;font-size:20px}
-  #spd{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
-  .quality{position:fixed;top:10px;right:10px;display:flex;gap:4px;background:rgba(0,0,0,.45);
+  #spd{min-width:42px;text-align:center;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+  .quality{position:fixed;top:10px;right:10px;z-index:2;display:flex;gap:4px;background:rgba(0,0,0,.45);
     padding:4px;border-radius:10px}
   .quality button{height:30px;padding:0 10px;border-radius:8px;border:1px solid rgba(255,255,255,.4);
     background:rgba(255,255,255,.1);color:#fff;font-size:12px}
   .quality button.on{background:rgba(80,170,255,.85);border-color:#6bf}
-  #zone{position:fixed;left:0;bottom:0;width:55%;height:100%}
-  #base{position:absolute;width:170px;height:170px;border-radius:50%;
-    border:3px solid rgba(255,255,255,.55);background:radial-gradient(circle,rgba(255,255,255,.12),rgba(255,255,255,.04));
-    transform:translate(-50%,-50%);pointer-events:none;transition:opacity .2s}
-  #knob{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;
+  /* dwie strefy: lewa połowa = gaz, prawa = skręt; gałka pojawia się pod palcem */
+  .zone{position:fixed;top:60px;bottom:0;width:50%}
+  #zl{left:0} #zr{right:0}
+  .base{position:absolute;border-radius:48px;border:3px solid rgba(255,255,255,.55);
+    background:rgba(255,255,255,.07);transform:translate(-50%,-50%);pointer-events:none;transition:opacity .2s}
+  .base.v{width:92px;height:250px} .base.h{width:250px;height:92px}
+  .base::after{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:11px;
+    color:rgba(255,255,255,.5);letter-spacing:.08em;white-space:nowrap}
+  .base.v::after{content:"GAZ"} .base.h::after{content:"SKRĘT"}
+  .knob{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;
     border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff,#9ad 70%);
-    box-shadow:0 2px 10px rgba(0,0,0,.6);opacity:.9}
+    box-shadow:0 2px 10px rgba(0,0,0,.6);opacity:.9;z-index:1}
   #hint{position:fixed;bottom:10px;right:10px;font-size:11px;color:#bbb}
   @media (pointer:coarse){#hint{display:none}}
   @media (orientation:portrait){
-    #zone{width:100%;height:55%}
-    #side{top:auto;bottom:auto;top:60px;transform:none}
+    #top{top:56px}
+    .zone{top:110px}
+    .base.h{width:180px}
   }
 </style>
 </head>
@@ -66,15 +73,15 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <div id="rc" class="hud"></div>
 <div id="readout" class="hud">L 0 · P 0</div>
 
-<div id="zone"><div id="base"><div id="knob"></div></div></div>
+<div class="zone" id="zl"><div class="base v"><div class="knob"></div></div></div>
+<div class="zone" id="zr"><div class="base h"><div class="knob"></div></div></div>
 
-<div id="side">
+<div id="top">
   <div class="btn" id="light" title="Światło (F)">&#128161;</div>
   <div class="speed">
-    <button id="up">+</button>
-    <span id="spd">70%</span>
-    <span>moc</span>
     <button id="down">&minus;</button>
+    <span id="spd">70%</span>
+    <button id="up">+</button>
   </div>
 </div>
 <div class="quality">
@@ -87,7 +94,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <script>
 (function(){
   var host = location.hostname || '192.168.4.1';
-  var RADIUS = 85;          // promień ruchu gałki (px)
+  var RADIUS = 85;          // zakres ruchu gałki (px)
   var DEADZONE = 0.08;      // martwa strefa analogu
   var TURN = 0.75;          // czułość skrętu
 
@@ -117,7 +124,8 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   function showRc(st){
     rcEl.className = 'hud' + (st === 2 ? ' armed' : st === 1 ? ' on' : '');
     rcEl.textContent = st === 2 ? 'Aparatura steruje' : st === 1 ? 'Aparatura połączona' : '';
-    document.getElementById('zone').classList.toggle('locked', st === 2);
+    zl.classList.toggle('locked', st === 2);
+    zr.classList.toggle('locked', st === 2);
   }
   function send(msg){ if (ws && ws.readyState === 1) ws.send(msg); }
   connect();
@@ -151,57 +159,59 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     document.getElementById(id).addEventListener('pointerdown', function(e){ e.preventDefault(); e.stopPropagation(); fn(); });
   }
 
-  // ---------- analog ----------
-  var zone = document.getElementById('zone'), base = document.getElementById('base'), knob = document.getElementById('knob');
-  var stick = { id: null, cx: 0, cy: 0, x: 0, y: 0 };
-
-  function homeBase(){
-    var r = zone.getBoundingClientRect();
-    base.style.left = (r.width / 2) + 'px';
-    base.style.top = (r.height - Math.max(110, r.height * 0.3)) + 'px';
-    base.style.opacity = '.6';
-  }
-  homeBase();
-  window.addEventListener('resize', function(){ if (stick.id === null) homeBase(); });
-
-  zone.addEventListener('pointerdown', function(e){
-    if (stick.id !== null) return;
-    e.preventDefault();
-    stick.id = e.pointerId;
-    zone.setPointerCapture(e.pointerId);
-    var r = zone.getBoundingClientRect();
-    stick.cx = e.clientX; stick.cy = e.clientY;   // analog pojawia się pod palcem
-    base.style.left = (e.clientX - r.left) + 'px';
-    base.style.top = (e.clientY - r.top) + 'px';
-    base.style.opacity = '1';
-    moveStick(e);
-  });
-  zone.addEventListener('pointermove', function(e){ if (e.pointerId === stick.id) moveStick(e); });
-  function endStick(e){
-    if (e.pointerId !== stick.id) return;
-    stick.id = null; stick.x = 0; stick.y = 0;
-    knob.style.transform = '';
-    homeBase();
-    pushNow();
-  }
-  zone.addEventListener('pointerup', endStick);
-  zone.addEventListener('pointercancel', endStick);
-
-  function moveStick(e){
-    var dx = e.clientX - stick.cx, dy = e.clientY - stick.cy;
-    var d = Math.sqrt(dx * dx + dy * dy);
-    if (d > RADIUS){ dx = dx / d * RADIUS; dy = dy / d * RADIUS; d = RADIUS; }
-    knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
-    var n = d / RADIUS;
-    if (n < DEADZONE){ stick.x = 0; stick.y = 0; }
-    else {
-      var k = (n - DEADZONE) / (1 - DEADZONE) / n;   // przeskalowanie poza martwą strefą
-      stick.x = dx / RADIUS * k;
-      stick.y = -dy / RADIUS * k;
+  // ---------- dwie gałki ----------
+  // axis 'y' = gaz (góra/dół), axis 'x' = skręt (lewo/prawo)
+  function makeStick(zone, axis){
+    var base = zone.querySelector('.base'), knob = zone.querySelector('.knob');
+    var st = { id: null, c: 0, v: 0, edge: false };
+    function home(){
+      var r = zone.getBoundingClientRect();
+      base.style.left = (r.width / 2) + 'px';
+      base.style.top = (r.height * 0.55) + 'px';
+      base.style.opacity = '.55';
     }
-    if (navigator.vibrate && n >= 1 && !stick.edge){ navigator.vibrate(8); }
-    stick.edge = n >= 1;
+    function move(e){
+      var d = (axis === 'y' ? e.clientY : e.clientX) - st.c;
+      d = Math.max(-RADIUS, Math.min(RADIUS, d));
+      knob.style.transform = axis === 'y' ? 'translateY(' + d + 'px)' : 'translateX(' + d + 'px)';
+      var n = Math.abs(d) / RADIUS;
+      var v = n < DEADZONE ? 0 : (n - DEADZONE) / (1 - DEADZONE);   // przeskalowanie poza martwą strefą
+      st.v = (axis === 'y' ? -1 : 1) * (d < 0 ? -v : v);          // gaz: w górę = do przodu
+      if (navigator.vibrate && n >= 1 && !st.edge) navigator.vibrate(8);
+      st.edge = n >= 1;
+    }
+    function end(e){
+      if (e.pointerId !== st.id) return;
+      st.id = null; st.v = 0; st.edge = false;
+      knob.style.transform = '';
+      home();
+      pushNow();
+    }
+    zone.addEventListener('pointerdown', function(e){
+      if (st.id !== null) return;
+      e.preventDefault();
+      st.id = e.pointerId;
+      try { zone.setPointerCapture(e.pointerId); } catch (err) {}
+      var r = zone.getBoundingClientRect();
+      // środek toru pod palcem, ale przesunięty tak, żeby cały tor mieścił się na ekranie
+      var m = RADIUS + 40, cx = e.clientX, cy = e.clientY;
+      if (axis === 'y') cy = Math.max(r.top + m, Math.min(window.innerHeight - m, cy));
+      else cx = Math.max(r.left + m, Math.min(r.right - m, cx));
+      st.c = axis === 'y' ? cy : cx;                 // gałka pojawia się pod palcem
+      base.style.left = (cx - r.left) + 'px';
+      base.style.top = (cy - r.top) + 'px';
+      base.style.opacity = '1';
+      move(e);
+    });
+    zone.addEventListener('pointermove', function(e){ if (e.pointerId === st.id) move(e); });
+    zone.addEventListener('pointerup', end);
+    zone.addEventListener('pointercancel', end);
+    window.addEventListener('resize', function(){ if (st.id === null) home(); });
+    home();
+    return st;
   }
+  var zl = document.getElementById('zl'), zr = document.getElementById('zr');
+  var gas = makeStick(zl, 'y'), steer = makeStick(zr, 'x');
 
   // ---------- klawiatura ----------
   var keys = {};
@@ -223,8 +233,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   // ---------- wysyłanie ----------
   var last = '', lastSent = 0, readout = document.getElementById('readout');
   function command(){
-    var x = stick.x, y = stick.y;
-    if (stick.id === null){ var k = keyAxis(); x = k.x; y = k.y; }
+    var k = keyAxis();
+    var x = steer.id !== null ? steer.v : k.x;
+    var y = gas.id !== null ? gas.v : k.y;
     var s = speed / 100;
     var X = Math.round(x * TURN * s * 100), Y = Math.round(y * s * 100);
     // podgląd mocy kół (to samo miksowanie co w ESP32)
