@@ -1,0 +1,426 @@
+/*
+ * ESP32-CAM + L298N – robot zdalnie sterowany z telefonu.
+ *
+ *  - ESP32 tworzy własną sieć Wi-Fi (lub łączy się z domową – patrz USE_AP_MODE)
+ *  - strona www z wirtualnym analogiem (joystick jak w grach) + podgląd z kamery
+ *  - sterowanie przez WebSocket (niskie opóźnienia), obraz MJPEG na porcie 81
+ *  - failsafe: silniki stają, gdy przez FAILSAFE_MS nie przyjdzie żadna komenda
+ *
+ * Płytka w Arduino IDE: "AI Thinker ESP32-CAM", Partition Scheme: "Huge APP".
+ * Wymagany pakiet esp32 by Espressif w wersji 2.x lub 3.x.
+ */
+
+#include <WiFi.h>
+#include "esp_arduino_version.h"
+#include "esp_camera.h"
+#include "esp_http_server.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+
+#include "camera_pins.h"
+#include "index_html.h"
+
+// ======================= KONFIGURACJA =======================
+
+// true  -> robot tworzy własną sieć (telefon łączy się z nią, adres 192.168.4.1)
+// false -> robot łączy się z Twoim routerem (adres sprawdzisz w Serial Monitorze)
+#define USE_AP_MODE true
+
+const char *AP_SSID = "ESP32-Robot";
+const char *AP_PASS = "robot1234";        // min. 8 znaków
+
+const char *STA_SSID = "TwojaSiec";
+const char *STA_PASS = "TwojeHaslo";
+
+// Piny L298N (zworki ENA i ENB ZAŁOŻONE – prędkość regulujemy PWM-em na INx)
+#define PIN_IN1 14   // silnik lewy  (OUT1/OUT2)
+#define PIN_IN2 15
+#define PIN_IN3 13   // silnik prawy (OUT3/OUT4)
+#define PIN_IN4 12
+
+// Jeśli koło kręci się w złą stronę – zmień na true zamiast przekładać kable
+#define INVERT_LEFT  false
+#define INVERT_RIGHT false
+
+// Dioda flash na płytce
+#define PIN_LIGHT   4
+#define LIGHT_DUTY  60   // jasność 0..255 (pełna moc mocno grzeje i oślepia)
+
+// Obrót obrazu, jeśli kamera jest zamontowana do góry nogami
+#define CAM_VFLIP   false
+#define CAM_HMIRROR false
+
+#define PWM_FREQ     1000  // Hz – dla L298N 500..2000 Hz działa dobrze
+#define PWM_RES      8     // rozdzielczość 8 bit -> 0..255
+#define MIN_DUTY     90    // minimalne wypełnienie, przy którym silnik rusza
+#define FAILSAFE_MS  600   // stop, gdy brak komend przez tyle ms
+
+// Kanały LEDC – 0/1 (timer 0) zajmuje kamera (XCLK), więc zaczynamy od 2
+#define CH_LIGHT 2
+#define CH_IN1   4
+#define CH_IN2   5
+#define CH_IN3   6
+#define CH_IN4   7
+
+// ============================================================
+
+static volatile int targetX = 0;            // -100..100 (skręt)
+static volatile int targetY = 0;            // -100..100 (przód/tył)
+static volatile unsigned long lastCmdMs = 0;
+static volatile bool lightOn = false;
+static bool lightApplied = false;
+static bool cameraOk = false;
+static bool hasPsram = false;
+
+// ---------- Presety jakości wideo ----------
+// Mniejsza rozdzielczość / wyższa liczba "quality" = mniej danych = więcej klatek/s.
+// jpeg quality: 10 (najlepsza) .. 63 (najgorsza)
+struct VideoPreset { framesize_t size; int quality; const char *name; };
+static const VideoPreset VIDEO_PRESETS[] = {
+  { FRAMESIZE_QVGA, 14, "Plynnie 320x240" },   // 0 – najwięcej FPS, najmniejsze opóźnienie
+  { FRAMESIZE_VGA,  12, "Balans 640x480" },    // 1
+  { FRAMESIZE_SVGA, 10, "Jakosc 800x600" },    // 2 – najładniej, ale wolniej
+};
+#define VIDEO_PRESET_COUNT (sizeof(VIDEO_PRESETS) / sizeof(VIDEO_PRESETS[0]))
+#define VIDEO_PRESET_DEFAULT 1
+
+httpd_handle_t webHttpd = NULL;
+httpd_handle_t streamHttpd = NULL;
+
+// ---------- PWM (kompatybilne z pakietem esp32 2.x i 3.x) ----------
+
+static void pwmAttach(uint8_t pin, uint8_t ch, uint32_t freq) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcAttachChannel(pin, freq, PWM_RES, ch);
+#else
+  ledcSetup(ch, freq, PWM_RES);
+  ledcAttachPin(pin, ch);
+#endif
+}
+
+static void pwmWrite(uint8_t pin, uint8_t ch, uint32_t duty) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  (void)ch;
+  ledcWrite(pin, duty);
+#else
+  (void)pin;
+  ledcWrite(ch, duty);
+#endif
+}
+
+// ---------- Silniki ----------
+
+// speed: -255..255
+static void setMotor(uint8_t pinA, uint8_t chA, uint8_t pinB, uint8_t chB, int speed) {
+  if (speed > 0) {
+    pwmWrite(pinA, chA, speed);
+    pwmWrite(pinB, chB, 0);
+  } else if (speed < 0) {
+    pwmWrite(pinA, chA, 0);
+    pwmWrite(pinB, chB, -speed);
+  } else {
+    pwmWrite(pinA, chA, 0);
+    pwmWrite(pinB, chB, 0);
+  }
+}
+
+// Przelicza wartość -100..100 na wypełnienie PWM z uwzględnieniem MIN_DUTY
+static int toDuty(int v) {
+  if (v == 0) return 0;
+  int mag = map(abs(v), 1, 100, MIN_DUTY, 255);
+  return v > 0 ? mag : -mag;
+}
+
+// Miksowanie "arcade drive": jeden analog -> dwa silniki (napęd czołgowy)
+static void drive(int x, int y) {
+  int left  = y + x;
+  int right = y - x;
+
+  int maxMag = max(abs(left), abs(right));
+  if (maxMag > 100) {               // zachowaj proporcje przy wychyleniu po skosie
+    left  = left  * 100 / maxMag;
+    right = right * 100 / maxMag;
+  }
+
+  if (INVERT_LEFT)  left  = -left;
+  if (INVERT_RIGHT) right = -right;
+
+  setMotor(PIN_IN1, CH_IN1, PIN_IN2, CH_IN2, toDuty(left));
+  setMotor(PIN_IN3, CH_IN3, PIN_IN4, CH_IN4, toDuty(right));
+}
+
+static void motorsInit() {
+  pwmAttach(PIN_IN1, CH_IN1, PWM_FREQ);
+  pwmAttach(PIN_IN2, CH_IN2, PWM_FREQ);
+  pwmAttach(PIN_IN3, CH_IN3, PWM_FREQ);
+  pwmAttach(PIN_IN4, CH_IN4, PWM_FREQ);
+  drive(0, 0);
+
+  pwmAttach(PIN_LIGHT, CH_LIGHT, 5000);
+  pwmWrite(PIN_LIGHT, CH_LIGHT, 0);
+}
+
+static void applyVideoPreset(int idx) {
+  if (!cameraOk) return;
+  if (idx < 0 || idx >= (int)VIDEO_PRESET_COUNT) return;
+  if (!hasPsram) idx = 0;             // bez PSRAM tylko najmniejsza rozdzielczość
+  sensor_t *s = esp_camera_sensor_get();
+  s->set_framesize(s, VIDEO_PRESETS[idx].size);
+  s->set_quality(s, VIDEO_PRESETS[idx].quality);
+  Serial.printf("Wideo: %s\n", VIDEO_PRESETS[idx].name);
+}
+
+// ---------- Komendy z przeglądarki ----------
+// "M x y"  – ruch, x i y w zakresie -100..100
+// "L 0|1"  – światło
+// "Q 0..2" – preset jakości wideo
+// "P"      – ping (podtrzymanie failsafe)
+
+static void handleCommand(const char *cmd) {
+  int a = 0, b = 0;
+  switch (cmd[0]) {
+    case 'M':
+      if (sscanf(cmd + 1, "%d %d", &a, &b) == 2) {
+        targetX = constrain(a, -100, 100);
+        targetY = constrain(b, -100, 100);
+      }
+      break;
+    case 'L':
+      if (sscanf(cmd + 1, "%d", &a) == 1) lightOn = (a != 0);
+      break;
+    case 'Q':
+      if (sscanf(cmd + 1, "%d", &a) == 1) applyVideoPreset(a);
+      break;
+    default:
+      break;
+  }
+  lastCmdMs = millis();
+}
+
+// ---------- Serwer WWW (port 80) ----------
+
+static esp_err_t indexHandler(httpd_req_t *req) {
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t wsHandler(httpd_req_t *req) {
+  if (req->method == HTTP_GET) {      // handshake
+    Serial.println("WebSocket: polaczono");
+    return ESP_OK;
+  }
+
+  httpd_ws_frame_t frame;
+  memset(&frame, 0, sizeof(frame));
+  frame.type = HTTPD_WS_TYPE_TEXT;
+
+  esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);   // tylko długość
+  if (ret != ESP_OK) return ret;
+  if (frame.len == 0) return ESP_OK;
+
+  uint8_t buf[64];
+  if (frame.len >= sizeof(buf)) return ESP_FAIL;
+  frame.payload = buf;
+  ret = httpd_ws_recv_frame(req, &frame, frame.len);
+  if (ret != ESP_OK) return ret;
+  buf[frame.len] = 0;
+
+  if (frame.type == HTTPD_WS_TYPE_TEXT) handleCommand((const char *)buf);
+  return ESP_OK;
+}
+
+// ---------- Strumień MJPEG (port 81) ----------
+
+#define PART_BOUNDARY "123456789000000000000987654321"
+static const char *STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
+static const char *STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
+static const char *STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
+
+static esp_err_t streamHandler(httpd_req_t *req) {
+  char partBuf[64];
+  esp_err_t res = httpd_resp_set_type(req, STREAM_CONTENT_TYPE);
+  if (res != ESP_OK) return res;
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+  while (true) {
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (!fb) {
+      Serial.println("Blad pobrania klatki");
+      res = ESP_FAIL;
+      break;
+    }
+
+    size_t hlen = snprintf(partBuf, sizeof(partBuf), STREAM_PART, fb->len);
+    res = httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY));
+    if (res == ESP_OK) res = httpd_resp_send_chunk(req, partBuf, hlen);
+    if (res == ESP_OK) res = httpd_resp_send_chunk(req, (const char *)fb->buf, fb->len);
+
+    esp_camera_fb_return(fb);
+    if (res != ESP_OK) break;         // klient się rozłączył
+  }
+  return res;
+}
+
+static void startServers() {
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.server_port = 80;
+  config.ctrl_port = 32768;
+  config.lru_purge_enable = true;
+
+  httpd_uri_t indexUri;
+  memset(&indexUri, 0, sizeof(indexUri));
+  indexUri.uri = "/";
+  indexUri.method = HTTP_GET;
+  indexUri.handler = indexHandler;
+
+  httpd_uri_t wsUri;
+  memset(&wsUri, 0, sizeof(wsUri));
+  wsUri.uri = "/ws";
+  wsUri.method = HTTP_GET;
+  wsUri.handler = wsHandler;
+  wsUri.is_websocket = true;
+
+  if (httpd_start(&webHttpd, &config) == ESP_OK) {
+    httpd_register_uri_handler(webHttpd, &indexUri);
+    httpd_register_uri_handler(webHttpd, &wsUri);
+  }
+
+  config.server_port = 81;
+  config.ctrl_port = 32769;
+
+  httpd_uri_t streamUri;
+  memset(&streamUri, 0, sizeof(streamUri));
+  streamUri.uri = "/stream";
+  streamUri.method = HTTP_GET;
+  streamUri.handler = streamHandler;
+
+  if (httpd_start(&streamHttpd, &config) == ESP_OK) {
+    httpd_register_uri_handler(streamHttpd, &streamUri);
+  }
+}
+
+// ---------- Kamera ----------
+
+static bool cameraInit() {
+  camera_config_t c;
+  memset(&c, 0, sizeof(c));
+  c.ledc_channel = LEDC_CHANNEL_0;
+  c.ledc_timer = LEDC_TIMER_0;
+  c.pin_d0 = Y2_GPIO_NUM;
+  c.pin_d1 = Y3_GPIO_NUM;
+  c.pin_d2 = Y4_GPIO_NUM;
+  c.pin_d3 = Y5_GPIO_NUM;
+  c.pin_d4 = Y6_GPIO_NUM;
+  c.pin_d5 = Y7_GPIO_NUM;
+  c.pin_d6 = Y8_GPIO_NUM;
+  c.pin_d7 = Y9_GPIO_NUM;
+  c.pin_xclk = XCLK_GPIO_NUM;
+  c.pin_pclk = PCLK_GPIO_NUM;
+  c.pin_vsync = VSYNC_GPIO_NUM;
+  c.pin_href = HREF_GPIO_NUM;
+  c.pin_sccb_sda = SIOD_GPIO_NUM;
+  c.pin_sccb_scl = SIOC_GPIO_NUM;
+  c.pin_pwdn = PWDN_GPIO_NUM;
+  c.pin_reset = RESET_GPIO_NUM;
+  c.xclk_freq_hz = 20000000;
+  c.pixel_format = PIXFORMAT_JPEG;
+  c.grab_mode = CAMERA_GRAB_LATEST;   // zawsze najświeższa klatka = mniejsze opóźnienie
+
+  hasPsram = psramFound();
+  if (hasPsram) {
+    // bufory alokujemy dla największego presetu, potem schodzimy do domyślnego
+    c.frame_size = FRAMESIZE_SVGA;
+    c.jpeg_quality = 10;
+    c.fb_count = 2;
+    c.fb_location = CAMERA_FB_IN_PSRAM;
+  } else {
+    c.frame_size = FRAMESIZE_QVGA;
+    c.jpeg_quality = 14;
+    c.fb_count = 1;
+    c.fb_location = CAMERA_FB_IN_DRAM;
+  }
+
+  esp_err_t err = esp_camera_init(&c);
+  if (err != ESP_OK) {
+    Serial.printf("Blad inicjalizacji kamery: 0x%x\n", err);
+    return false;
+  }
+
+  sensor_t *s = esp_camera_sensor_get();
+  s->set_vflip(s, CAM_VFLIP);
+  s->set_hmirror(s, CAM_HMIRROR);
+  cameraOk = true;
+  applyVideoPreset(VIDEO_PRESET_DEFAULT);
+  return true;
+}
+
+// ---------- Wi-Fi ----------
+
+static void wifiInit() {
+  WiFi.setSleep(false);               // mniejsze opóźnienia sterowania
+
+  if (!USE_AP_MODE) {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(STA_SSID, STA_PASS);
+    Serial.print("Laczenie z siecia");
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+      delay(300);
+      Serial.print(".");
+    }
+    Serial.println();
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.print("Otworz w przegladarce: http://");
+      Serial.println(WiFi.localIP());
+      return;
+    }
+    Serial.println("Brak polaczenia - przelaczam na tryb AP");
+  }
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  WiFi.setSleep(false);
+  Serial.printf("Siec: %s  haslo: %s\n", AP_SSID, AP_PASS);
+  Serial.print("Otworz w przegladarce: http://");
+  Serial.println(WiFi.softAPIP());
+}
+
+// ============================================================
+
+void setup() {
+  // Wyłącz detektor brown-out – rozruch silników potrafi chwilowo obniżyć napięcie
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
+  Serial.begin(115200);
+  Serial.println("\nESP32-CAM Robot");
+
+  motorsInit();
+
+  if (!cameraInit()) {
+    Serial.println("Kamera nie dziala - sterowanie bedzie dzialac bez obrazu");
+  }
+
+  wifiInit();
+  startServers();
+}
+
+void loop() {
+  int x = targetX;
+  int y = targetY;
+
+  // Failsafe: brak sygnału z telefonu -> stop
+  if (millis() - lastCmdMs > FAILSAFE_MS) {
+    x = 0;
+    y = 0;
+  }
+  drive(x, y);
+
+  bool l = lightOn;
+  if (l != lightApplied) {
+    pwmWrite(PIN_LIGHT, CH_LIGHT, l ? LIGHT_DUTY : 0);
+    lightApplied = l;
+  }
+
+  delay(10);
+}
