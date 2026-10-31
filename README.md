@@ -122,7 +122,7 @@ Ważne:
    Jeśli wgrywanie się nie zaczyna, przytrzymaj **IO0** na programatorze, naciśnij i puść **RST**, a potem puść IO0.
 6. Otwórz Serial Monitor (115200), naciśnij RST i sprawdź komunikaty.
 
-Gotowe pliki `.bin` buduje też GitHub Actions (zakładka *Actions*, artefakt `firmware-…`).
+**Bez Arduino IDE:** gotowy firmware znajdziesz w zakładce **Releases**. Plik `…-full.bin` wgrywasz pod adres `0x0` przez https://espressif.github.io/esptool-js/ (Chrome/Edge). Szczegóły są w opisie wydania.
 
 ## Konfiguracja
 
@@ -142,3 +142,7 @@ Wszystkie ustawienia są na górze pliku `esp32_cam_robot.ino`:
 Jeśli robot skręca w lewo, gdy wychylasz analog w prawo, zamień miejscami przewody silnika lewego i prawego (OUT1/2 ↔ OUT3/4) albo ustaw oba `INVERT_*`.
 
 **Wskazówka:** na telefonie dodaj stronę do ekranu głównego („Dodaj do ekranu początkowego”) i trzymaj telefon poziomo. Pasek adresu wtedy znika.
+
+## Nowe wydanie (dla autora)
+
+*Actions → Release → Run workflow* i podajesz numer wersji (np. `v1.1.0`). Workflow skompiluje firmware i utworzy Release z plikami `.bin` oraz opisem z `.github/release-notes.md`.

@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Numer wersji (np. v1.0.0)"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.0.7
+
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32cam:PartitionScheme=huge_app \
+            --output-dir build \
+            esp32_cam_robot
+          ls -la build
+
+      - name: Prepare files
+        run: |
+          mkdir dist
+          V="${{ inputs.version }}"
+          cp build/esp32_cam_robot.ino.merged.bin     "dist/esp32-cam-robot-${V}-full.bin"
+          cp build/esp32_cam_robot.ino.bin            "dist/esp32-cam-robot-${V}-app.bin"
+          cp build/esp32_cam_robot.ino.bootloader.bin "dist/bootloader.bin"
+          cp build/esp32_cam_robot.ino.partitions.bin "dist/partitions.bin"
+          cp "$(find ~/.arduino15/packages/esp32/hardware/esp32 -name boot_app0.bin | head -1)" dist/boot_app0.bin
+          ls -la dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: ESP32-CAM Robot ${{ inputs.version }}
+          target_commitish: ${{ github.sha }}
+          body_path: .github/release-notes.md
+          files: dist/*
