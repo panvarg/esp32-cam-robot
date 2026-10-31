@@ -5,6 +5,8 @@
  *  - strona www z wirtualnym analogiem (joystick jak w grach) + podgląd z kamery
  *  - sterowanie przez WebSocket (niskie opóźnienia), obraz MJPEG na porcie 81
  *  - failsafe: silniki stają, gdy przez FAILSAFE_MS nie przyjdzie żadna komenda
+ *  - opcjonalnie odbiornik ExpressLRS (CRSF) – aparatura ma pierwszeństwo,
+ *    gdy jest połączona i uzbrojona; w pozostałych przypadkach steruje telefon
  *
  * Płytka w Arduino IDE: "AI Thinker ESP32-CAM", Partition Scheme: "Huge APP".
  * Wymagany pakiet esp32 by Espressif w wersji 2.x lub 3.x.
@@ -14,6 +16,7 @@
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
+#include "driver/uart.h"
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
@@ -55,6 +58,22 @@ const char *STA_PASS = "TwojeHaslo";
 #define MIN_DUTY     90    // minimalne wypełnienie, przy którym silnik rusza
 #define FAILSAFE_MS  600   // stop, gdy brak komend przez tyle ms
 
+// ---------- Odbiornik ELRS / CRSF ----------
+// Podłączenie: TX odbiornika -> GPIO 2, VCC -> 5V, GND -> GND (RX odbiornika zostaw wolny)
+// Numery kanałów jak w aparaturze (1..16). 0 = nieużywany.
+#define RC_ENABLED      true
+#define RC_RX_PIN       2
+#define RC_CH_TURN      1    // prawy drążek lewo/prawo (aileron)
+#define RC_CH_DRIVE     2    // prawy drążek góra/dół (elevator)
+#define RC_CH_SPEED     3    // gaz = ograniczenie mocy (0 -> ustala RC_DEFAULT_SPEED)
+#define RC_CH_ARM       5    // AUX1: włączony = aparatura przejmuje sterowanie
+#define RC_CH_LIGHT     6    // AUX2: światło
+#define RC_MIN_SPEED    25   // moc przy gazie na dole, %
+#define RC_DEFAULT_SPEED 70  // moc, gdy RC_CH_SPEED = 0, %
+#define RC_TURN_GAIN    75   // czułość skrętu, %
+#define RC_DEADBAND     5    // martwa strefa drążków, %
+#define RC_TIMEOUT_MS   250  // brak ramek przez tyle ms = brak połączenia
+
 // Kanały LEDC – 0/1 (timer 0) zajmuje kamera (XCLK), więc zaczynamy od 2
 #define CH_LIGHT 2
 #define CH_IN1   4
@@ -69,6 +88,9 @@ static volatile int targetY = 0;            // -100..100 (przód/tył)
 static volatile unsigned long lastCmdMs = 0;
 static volatile bool lightOn = false;
 static bool lightApplied = false;
+
+// Stan aparatury: 0 = brak, 1 = połączona (steruje telefon), 2 = uzbrojona (steruje aparatura)
+static volatile uint8_t rcState = 0;
 static bool cameraOk = false;
 static bool hasPsram = false;
 
@@ -170,6 +192,137 @@ static void applyVideoPreset(int idx) {
   Serial.printf("Wideo: %s\n", VIDEO_PRESETS[idx].name);
 }
 
+// ---------- Odbiornik ELRS (protokół CRSF, 420000 bodów) ----------
+
+#define RC_UART          UART_NUM_2
+#define CRSF_ADDR_FC     0xC8
+#define CRSF_TYPE_LINK   0x14
+#define CRSF_TYPE_RC     0x16
+#define CRSF_MID         992
+#define CRSF_SPAN        820   // 172..1811 -> -100..100 %
+
+static uint16_t rcCh[16];
+static bool rcHaveFrame = false;
+static unsigned long rcLastFrameMs = 0;
+static uint8_t rcLinkQuality = 100;
+static bool rcArmLatched = false;
+static int rcLastLightSw = -1;
+static int rcX = 0, rcY = 0;
+static uint8_t rcBuf[64];
+static uint8_t rcLen = 0;
+
+static uint8_t crc8(const uint8_t *d, uint8_t n) {
+  uint8_t c = 0;
+  while (n--) {
+    c ^= *d++;
+    for (int i = 0; i < 8; i++) c = (c & 0x80) ? (c << 1) ^ 0xD5 : (c << 1);
+  }
+  return c;
+}
+
+static void rcInit() {
+  if (!RC_ENABLED) return;
+  // Sterownik UART z ESP-IDF zamiast Serial2 – HardwareSerial przy braku pinu TX
+  // podpiąłby domyślny GPIO 17, który w ESP32-CAM obsługuje PSRAM.
+  uart_config_t cfg = {};
+  cfg.baud_rate = 420000;
+  cfg.data_bits = UART_DATA_8_BITS;
+  cfg.parity = UART_PARITY_DISABLE;
+  cfg.stop_bits = UART_STOP_BITS_1;
+  cfg.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
+  cfg.source_clk = UART_SCLK_APB;
+  uart_param_config(RC_UART, &cfg);
+  uart_set_pin(RC_UART, UART_PIN_NO_CHANGE, RC_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+  uart_driver_install(RC_UART, 1024, 0, 0, NULL, 0);
+}
+
+static void rcFrame(const uint8_t *f) {   // f: [adres][dlugosc][typ][dane...][crc]
+  uint8_t type = f[2];
+  const uint8_t *p = f + 3;
+  uint8_t plen = f[1] - 2;
+
+  if (type == CRSF_TYPE_RC && plen >= 22) {
+    // 16 kanałów po 11 bitów, little-endian
+    uint32_t bits = 0;
+    uint8_t nb = 0, ch = 0;
+    for (int i = 0; i < 22 && ch < 16; i++) {
+      bits |= (uint32_t)p[i] << nb;
+      nb += 8;
+      while (nb >= 11 && ch < 16) {
+        rcCh[ch++] = bits & 0x7FF;
+        bits >>= 11;
+        nb -= 11;
+      }
+    }
+    rcHaveFrame = true;
+    rcLastFrameMs = millis();
+  } else if (type == CRSF_TYPE_LINK && plen >= 3) {
+    rcLinkQuality = p[2];                // uplink LQ, 0 = utracone połączenie
+  }
+}
+
+static void rcPoll() {
+  if (!RC_ENABLED) return;
+  uint8_t tmp[64];
+  int n;
+  while ((n = uart_read_bytes(RC_UART, tmp, sizeof(tmp), 0)) > 0) {
+    for (int i = 0; i < n; i++) {
+      uint8_t b = tmp[i];
+      if (rcLen == 0 && b != CRSF_ADDR_FC) continue;
+      rcBuf[rcLen++] = b;
+      if (rcLen == 2 && (b < 2 || b > 62)) { rcLen = 0; continue; }
+      if (rcLen > 2 && rcLen == rcBuf[1] + 2) {
+        if (crc8(rcBuf + 2, rcBuf[1] - 1) == rcBuf[rcLen - 1]) rcFrame(rcBuf);
+        rcLen = 0;
+      }
+    }
+  }
+}
+
+static int rcRaw(int ch) { return ch >= 1 && ch <= 16 ? rcCh[ch - 1] : CRSF_MID; }
+
+static int rcAxis(int ch) {               // -100..100 %
+  if (ch == 0) return 0;
+  int v = constrain((rcRaw(ch) - CRSF_MID) * 100 / CRSF_SPAN, -100, 100);
+  return abs(v) < RC_DEADBAND ? 0 : v;
+}
+
+static bool rcSwitch(int ch) { return ch != 0 && rcRaw(ch) > 1300; }   // > ~1700 us
+
+static void rcUpdate() {
+  bool connected = RC_ENABLED && rcHaveFrame && rcLinkQuality > 0 &&
+                   millis() - rcLastFrameMs < RC_TIMEOUT_MS;
+  if (!connected) {
+    rcState = 0;
+    rcArmLatched = false;
+    rcLastLightSw = -1;
+    return;
+  }
+
+  int turn = rcAxis(RC_CH_TURN);
+  int fwd  = rcAxis(RC_CH_DRIVE);
+  int speed = RC_DEFAULT_SPEED;
+  if (RC_CH_SPEED) {
+    int pct = constrain((rcRaw(RC_CH_SPEED) - 172) * 100 / 1639, 0, 100);
+    speed = RC_MIN_SPEED + pct * (100 - RC_MIN_SPEED) / 100;
+  }
+
+  // Uzbrojenie tylko przy drążku w środku – robot nie wystrzeli po przełączeniu AUX
+  if (!rcSwitch(RC_CH_ARM)) rcArmLatched = false;
+  else if (!rcArmLatched && abs(turn) < 10 && abs(fwd) < 10) rcArmLatched = true;
+
+  rcX = turn * speed / 100 * RC_TURN_GAIN / 100;
+  rcY = fwd * speed / 100;
+  rcState = rcArmLatched ? 2 : 1;
+
+  // Światło: przełącznik działa przy każdej zmianie, telefon też może je przełączać
+  if (RC_CH_LIGHT) {
+    int sw = rcSwitch(RC_CH_LIGHT);
+    if (sw != rcLastLightSw) lightOn = sw;
+    rcLastLightSw = sw;
+  }
+}
+
 // ---------- Komendy z przeglądarki ----------
 // "M x y"  – ruch, x i y w zakresie -100..100
 // "L 0|1"  – światło
@@ -226,8 +379,18 @@ static esp_err_t wsHandler(httpd_req_t *req) {
   if (ret != ESP_OK) return ret;
   buf[frame.len] = 0;
 
-  if (frame.type == HTTPD_WS_TYPE_TEXT) handleCommand((const char *)buf);
-  return ESP_OK;
+  if (frame.type != HTTPD_WS_TYPE_TEXT) return ESP_OK;
+  handleCommand((const char *)buf);
+
+  // Odpowiedź ze stanem: "R <stan aparatury> <światło>"
+  char out[16];
+  int olen = snprintf(out, sizeof(out), "R %d %d", rcState, lightOn ? 1 : 0);
+  httpd_ws_frame_t reply;
+  memset(&reply, 0, sizeof(reply));
+  reply.type = HTTPD_WS_TYPE_TEXT;
+  reply.payload = (uint8_t *)out;
+  reply.len = olen;
+  return httpd_ws_send_frame(req, &reply);
 }
 
 // ---------- Strumień MJPEG (port 81) ----------
@@ -396,6 +559,7 @@ void setup() {
   Serial.println("\nESP32-CAM Robot");
 
   motorsInit();
+  rcInit();
 
   if (!cameraInit()) {
     Serial.println("Kamera nie dziala - sterowanie bedzie dzialac bez obrazu");
@@ -406,13 +570,18 @@ void setup() {
 }
 
 void loop() {
-  int x = targetX;
-  int y = targetY;
+  rcPoll();
+  rcUpdate();
 
-  // Failsafe: brak sygnału z telefonu -> stop
-  if (millis() - lastCmdMs > FAILSAFE_MS) {
-    x = 0;
-    y = 0;
+  int x = 0, y = 0;
+  if (rcState == 2) {
+    // aparatura połączona i uzbrojona – ma pierwszeństwo
+    x = rcX;
+    y = rcY;
+  } else if (millis() - lastCmdMs <= FAILSAFE_MS) {
+    // telefon; bez świeżych komend (failsafe) robot stoi
+    x = targetX;
+    y = targetY;
   }
   drive(x, y);
 
@@ -422,5 +591,5 @@ void loop() {
     lightApplied = l;
   }
 
-  delay(10);
+  delay(2);
 }

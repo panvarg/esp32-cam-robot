@@ -22,6 +22,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   #status{top:10px;left:10px;display:flex;align-items:center;gap:6px}
   #dot{width:10px;height:10px;border-radius:50%;background:#e33;box-shadow:0 0 6px #e33}
   #dot.ok{background:#2d6;box-shadow:0 0 6px #2d6}
+  #rc{top:52px;left:10px;display:none}
+  #rc.on{display:block;color:#fd5}
+  #rc.armed{display:block;color:#000;background:rgba(80,220,120,.9)}
+  #zone.locked{opacity:.3}
   #readout{bottom:10px;left:50%;transform:translateX(-50%);font-variant-numeric:tabular-nums}
   #side{position:fixed;right:16px;top:50%;transform:translateY(-50%);display:flex;
     flex-direction:column;gap:14px;align-items:center}
@@ -59,6 +63,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <img id="cam" alt="">
 
 <div id="status" class="hud"><span id="dot"></span><span id="stxt">łączenie…</span></div>
+<div id="rc" class="hud"></div>
 <div id="readout" class="hud">L 0 · P 0</div>
 
 <div id="zone"><div id="base"><div id="knob"></div></div></div>
@@ -97,9 +102,22 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   var ws = null, dot = document.getElementById('dot'), stxt = document.getElementById('stxt');
   function connect(){
     ws = new WebSocket('ws://' + host + '/ws');
-    ws.onopen = function(){ dot.className = 'ok'; stxt.textContent = 'połączono'; sendLight(); sendQuality(); };
-    ws.onclose = function(){ dot.className = ''; stxt.textContent = 'rozłączono'; setTimeout(connect, 1000); };
+    ws.onopen = function(){ dot.className = 'ok'; stxt.textContent = 'połączono'; sendQuality(); };
+    ws.onmessage = function(e){
+      var p = String(e.data).split(' ');
+      if (p[0] !== 'R') return;
+      showRc(+p[1]);
+      var l = p[2] === '1';
+      if (l !== light){ light = l; lightEl.classList.toggle('on', light); }
+    };
+    ws.onclose = function(){ showRc(0); dot.className = ''; stxt.textContent = 'rozłączono'; setTimeout(connect, 1000); };
     ws.onerror = function(){ try{ ws.close(); }catch(e){} };
+  }
+  var rcEl = document.getElementById('rc');
+  function showRc(st){
+    rcEl.className = 'hud' + (st === 2 ? ' armed' : st === 1 ? ' on' : '');
+    rcEl.textContent = st === 2 ? 'Aparatura steruje' : st === 1 ? 'Aparatura połączona' : '';
+    document.getElementById('zone').classList.toggle('locked', st === 2);
   }
   function send(msg){ if (ws && ws.readyState === 1) ws.send(msg); }
   connect();

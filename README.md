@@ -76,6 +76,41 @@ Najlepiej użyć **obu modułów L298N**, tak żeby każdy silnik miał własny 
 - Obrót w miejscu przy 4 kołach wymaga sporo siły, bo koła ślizgają się bokiem. Jeśli robot przy małym wychyleniu tylko buczy, zwiększ `MIN_DUTY` (np. do 110–130). Pomaga też zasilanie 2S Li-ion (7,4–8,4 V), a nie 4×AA.
 - Wersja oszczędna: jeden L298N, a dwa silniki z każdej strony połączone równolegle na jednym kanale (lewe na OUT1/OUT2, prawe na OUT3/OUT4). Działa, ale moduł mocno się grzeje.
 
+## Odbiornik ELRS (opcjonalnie)
+
+Robota można też prowadzić aparaturą RC z odbiornikiem ExpressLRS, takim jak do dronów. Odbiornik wysyła dane w protokole CRSF.
+
+```
+ Odbiornik ELRS        ESP32-CAM
+ ──────────────        ─────────
+ TX  ───────────────── GPIO 2
+ RX                    (niepodłączony – robot nic nie odsyła)
+ VCC ───────────────── 5V
+ GND ───────────────── GND
+```
+
+**Kto steruje:**
+
+| Stan | Steruje |
+|---|---|
+| odbiornik niepodłączony albo aparatura wyłączona | telefon |
+| aparatura połączona, AUX1 wyłączony | telefon (na stronie widać napis „Aparatura połączona”) |
+| aparatura połączona, AUX1 włączony | **aparatura** (na stronie: „Aparatura steruje”, analog na ekranie jest wyszarzony) |
+| zerwane połączenie z aparaturą | po 0,25 s sterowanie wraca do telefonu |
+
+Kanały (tryb 2, ustawienia na górze `.ino`, `RC_CH_*`):
+- **CH1** (prawy drążek lewo/prawo) – skręt
+- **CH2** (prawy drążek góra/dół) – jazda przód/tył
+- **CH3** (gaz) – ograniczenie mocy, od 25% przy gazie na dole do 100% przy gazie na górze
+- **CH5 / AUX1** – przejęcie sterowania przez aparaturę. Uzbrojenie zadziała tylko wtedy, gdy drążek jazdy jest w środku.
+- **CH6 / AUX2** – światło. Przełącznik zmienia stan przy każdym przestawieniu, a przycisk na stronie działa nadal.
+
+Ważne:
+- W ustawieniach odbiornika ELRS (Lua lub WebUI) ustaw **Failsafe = No Pulses** (domyślne). W trybie „Last Position” robot po utracie zasięgu jechałby dalej.
+- Odbiornik powinien pracować w trybie CRSF/Serial (domyślny) na 420000 bodów.
+- GPIO 2 jest pinem rozruchowym. **Przy wgrywaniu programu odłącz przewód z GPIO 2**, inaczej ESP32 może nie wejść w tryb programowania. W normalnej pracy to nie przeszkadza.
+- Chcesz wyłączyć obsługę odbiornika? Ustaw `RC_ENABLED false`.
+
 ## Wgrywanie (Arduino IDE)
 
 1. W *Preferencje → Dodatkowe adresy URL menedżera płytek* wpisz:
