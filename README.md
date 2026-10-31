@@ -2,7 +2,7 @@
 
 Robot sterowany z telefonu przez przeglądarkę: obraz z kamery na pełnym ekranie i wirtualny analog jak w grach.
 
-**Sprzęt:** ESP32-CAM (AI-Thinker) z programatorem ESP32-CAM-MB, sterownik L298N, 2 silniki DC (podwozie 2WD lub 4WD z silnikami połączonymi parami), akumulator 7–12 V (np. 2× 18650).
+**Sprzęt:** ESP32-CAM (AI-Thinker) z programatorem ESP32-CAM-MB, sterownik L298N, 2 lub 4 silniki DC (2WD albo 4WD, patrz niżej), akumulator 7–12 V (np. 2× 18650).
 
 ## Jak to działa
 
@@ -44,6 +44,37 @@ Uwagi:
 - **GPIO 12** jest pinem konfiguracyjnym. Jeśli w chwili startu ma stan wysoki, ESP32 się nie uruchomi (błąd flash/boot). Wejścia L298N zwykle tego nie robią, ale jeśli robot nie startuje, odłącz na chwilę przewód z IN4 przy resecie albo dodaj rezystor 10 kΩ z GPIO 12 do GND.
 - Programator ESP32-CAM-MB zakłada się tylko do wgrywania programu. W robocie ESP32-CAM zasilasz z L298N.
 - Silniki przy ruszaniu powodują spadki napięcia. Kondensator 470–1000 µF na zasilaniu 5 V ESP32-CAM i kondensatory 100 nF na zaciskach silników bardzo pomagają.
+
+## Wersja 4×4: 4 silniki, dwa L298N
+
+Przy 4 nieskrętnych kołach robot skręca jak czołg: koła lewej strony kręcą się inaczej niż koła prawej strony. Kod już to robi, więc nic w nim nie zmieniasz. Zmienia się tylko okablowanie.
+
+Najlepiej użyć **obu modułów L298N**, tak żeby każdy silnik miał własny kanał. Jeden kanał L298N daje realnie ok. 1–1,5 A, a dwa silniki na jednym kanale przy skręcie w miejscu łatwo go przegrzewają. Wejścia obu modułów łączysz równolegle z tymi samymi pinami ESP32:
+
+```
+ ESP32-CAM      L298N #1 (przód)     L298N #2 (tył)
+ ─────────      ────────────────     ──────────────
+ GPIO 14  ───┬─ IN1                ┌─ IN1
+             └─────────────────────┘
+ GPIO 15  ───┬─ IN2                ┌─ IN2
+             └─────────────────────┘
+ GPIO 13  ───┬─ IN3                ┌─ IN3
+             └─────────────────────┘
+ GPIO 12  ───┬─ IN4                ┌─ IN4
+             └─────────────────────┘
+ GND      ───── GND ─────────────────── GND ── akumulator −
+                +12V ────────────────── +12V ── akumulator +
+ 5V       ───── +5V    (tylko z JEDNEGO modułu!)
+
+ L298N #1: OUT1/OUT2 = lewy przedni    OUT3/OUT4 = prawy przedni
+ L298N #2: OUT1/OUT2 = lewy tylny      OUT3/OUT4 = prawy tylny
+```
+
+- ESP32-CAM zasilaj z wyjścia +5V **tylko jednego** modułu. Pinów +5V obu modułów nie łącz ze sobą.
+- Po podłączeniu podnieś robota i dla każdego koła sprawdź, czy przy wychyleniu analogu do przodu kręci się do przodu. Jeśli któreś kręci się odwrotnie, zamień przewody tylko tego silnika na zaciskach OUTx. Koła po jednej stronie muszą kręcić się zgodnie, inaczej będą ze sobą walczyć.
+- `INVERT_LEFT` / `INVERT_RIGHT` odwracają całą stronę naraz, czyli oba moduły.
+- Obrót w miejscu przy 4 kołach wymaga sporo siły, bo koła ślizgają się bokiem. Jeśli robot przy małym wychyleniu tylko buczy, zwiększ `MIN_DUTY` (np. do 110–130). Pomaga też zasilanie 2S Li-ion (7,4–8,4 V), a nie 4×AA.
+- Wersja oszczędna: jeden L298N, a dwa silniki z każdej strony połączone równolegle na jednym kanale (lewe na OUT1/OUT2, prawe na OUT3/OUT4). Działa, ale moduł mocno się grzeje.
 
 ## Wgrywanie (Arduino IDE)
 
