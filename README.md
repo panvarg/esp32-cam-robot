@@ -18,10 +18,12 @@ Robot sterowany z telefonu przez przeglądarkę: obraz z kamery na pełnym ekran
   - automatyczna albo ręczna ekspozycja;
   - efekty: negatyw, czarno-biały, sepia i inne.
 - Obok statusu połączenia widać aktualną liczbę klatek na sekundę (FPS).
-- Menu ⚙ ma pięć zakładek. Wszystko zapisuje się w robocie. Piny, typ napędu i częstotliwość PWM zaczynają działać po przycisku „Zapisz i uruchom ponownie”, reszta od razu.
+- Menu ⚙ ma siedem zakładek. Wszystko zapisuje się w robocie. Piny, typ napędu i częstotliwość PWM zaczynają działać po przycisku „Zapisz i uruchom ponownie”, reszta od razu.
   - **Obraz:** rozdzielczość, kompresja, obrót, kolory, ekspozycja, efekty, opcje na zakłócenia (taktowanie kamery 10/20 MHz, limit wzmocnienia, korekcja pikseli i rogów)
   - **Napęd:** sterownik (L298N albo TB6612FNG), **schemat połączeń** (rysunek płytki ESP32-CAM z opisem każdego pinu i karty modułów, liczone na żywo z ustawień), czołg albo Mecanum, liczba silników, piny L298N, odwrócenie kierunku, moc startowa, czułość skrętu, maksymalna moc, płynny rozruch, martwa strefa gałek, czas failsafe, częstotliwość PWM, pin i jasność diody
   - **ELRS:** pin odbiornika, przypisanie kanałów, moc przy gazie na dole, martwa strefa, czas utraty sygnału, podgląd 16 kanałów z odwracaniem
+  - **Serwa:** moduł PCA9685 i do 6 serw (opisane niżej)
+  - **Przyciski:** do 8 własnych przycisków na ekranie z przypisanymi funkcjami
   - **Wi-Fi:** sieć robota albo domowa (opisane niżej)
   - **System:** wersja, pamięć, aktualizacja przez Wi-Fi, kopia ustawień do pliku, restart
 - Na komputerze możesz sterować klawiszami WASD lub strzałkami. Q/E to jazda bokiem (Mecanum), a `F` włącza światło.
@@ -139,6 +141,34 @@ Ograniczenia: ESP32-CAM ma tylko 8 wolnych pinów, więc w trybie Mecanum zajęt
 Sterowanie Mecanum z telefonu: **lewa gałka jest okrągła** (przód/tył i jazda bokiem), a **prawa obraca robota**. Pierwszy test zrób z robotem podniesionym:
 1. Do przodu: wszystkie 4 koła kręcą się do przodu. Jeśli któreś kręci się odwrotnie, zaznacz je w menu „Odwróć kierunek”.
 2. Bokiem: koła po przekątnej (lewe przednie i prawe tylne, prawe przednie i lewe tylne) kręcą się w tę samą stronę, a przednie i tylne po tej samej stronie w przeciwne. Jeśli na podłodze robot jedzie bokiem w złą stronę albo zamiast bokiem jedzie do przodu, zamień miejscami koła przednie z tylnymi, bo rolki muszą tworzyć właściwy wzór.
+
+## Serwa, PCA9685 i własne przyciski
+
+**Serwa** (menu ⚙ → Serwa), np. kamera na uchwycie pan/tilt, chwytak albo ramię:
+- Do 6 serw: 2 na pinach ESP32 (zwykle U0T/U0R albo IO2, jeśli nie ma ELRS), reszta na module PCA9685.
+- Każde ma nazwę, zakres ruchu (min/max), środek, odwrócenie, prędkość ruchu i przyciski testowe.
+- **Sterowanie:**
+  - **Przeciąganie obrazu:** serwo z rolą *pan* albo *tilt*. Na ekranie między gałkami pojawia się pas: przesuń palcem, żeby obrócić kamerę. Dwuklik ją centruje.
+  - **Kanał aparatury:** np. pokrętło albo suwak w nadajniku.
+  - **Tylko przyciski.**
+- Serwa zasilaj z przetwornicy 5 V (min. 2 A), nie ze stabilizatora L298N. Każde serwo pobiera chwilowo do 0,7 A.
+
+**Moduł PCA9685** (16 kanałów PWM przez I2C) zajmuje 2 piny ESP32 (SDA, SCL), np. U0T i U0R. Na jego kanały można przypisać serwa, a także **silniki, diodę i wyjścia przycisków**. Dzięki temu Mecanum, ELRS, dioda i serwa działają jednocześnie.
+- Podłączenie: VCC do 3V3, GND do masy, SDA i SCL do wybranych pinów, V+ do 5–6 V z przetwornicy (zasilanie serw).
+- Częstotliwość PWM jest wspólna dla wszystkich kanałów. Zwykłe serwa potrzebują 50 Hz.
+- Silniki na kanałach PCA działają z tą samą częstotliwością co serwa (np. 50 Hz). Jadą, ale mogą buczeć.
+
+**Własne przyciski** (menu ⚙ → Przyciski). Do 8 przycisków w prawym górnym rogu ekranu. Każdy ma swój napis (może być emoji) i jedną z funkcji:
+- **Światło:** włącza i wyłącza diodę.
+- **Wyjście:** włącza i wyłącza pin ESP32 albo kanał PCA, np. dodatkowe światła, buzzer albo przekaźnik przez moduł z tranzystorem. Działa jako przełącznik albo tylko na przytrzymanie.
+- **Serwo:** ustawia serwo w pozycji A, a po wyłączeniu w pozycji B, np. otwiera i zamyka chwytak.
+- **Kamera na środek.**
+- **Moc:** ustawia wybraną moc.
+- **Turbo:** daje 100% mocy, dopóki trzymasz przycisk.
+
+Światło, wyjścia, serwa i centrowanie kamery można też przypisać do przełącznika w aparaturze. Wtedy stan przełącznika jest stanem funkcji.
+
+Schemat połączeń (⚙ → Napęd albo Serwa) pokazuje moduł PCA9685 z opisem każdego kanału, serwa i wyjścia przycisków.
 
 ## Odbiornik ELRS (opcjonalnie)
 

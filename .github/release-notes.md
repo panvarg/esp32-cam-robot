@@ -1,5 +1,13 @@
 Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu (dwie gałki na ekranie + podgląd z kamery) oraz opcjonalnie z aparatury ExpressLRS.
 
+## Co nowego w v1.4.0
+
+- **serwa** (do 6): zakres, środek, odwrócenie, prędkość; sterowanie przeciąganiem obrazu (kamera pan/tilt, dwuklik = środek), kanałem aparatury albo przyciskami
+- **moduł PCA9685** (16 kanałów przez I2C na 2 pinach): serwa, ale też silniki, dioda i wyjścia przycisków – koniec z brakiem pinów (np. Mecanum + ELRS + serwa)
+- **własne przyciski na ekranie** (do 8) z przypisywanymi funkcjami: światło, wyjście (przełącznik / przytrzymanie), serwo A/B, kamera na środek, moc, turbo; również z przełączników aparatury
+- schemat połączeń: karta PCA9685 z opisem kanałów, serwa i wyjścia; nowe zakładki menu w dwóch rzędach
+- kopia ustawień obejmuje serwa, przyciski i PCA9685
+
 ## Co nowego w v1.3.2
 
 - schemat połączeń: **rysunki modułów L298N i TB6612FNG** z opisem każdego pinu i zacisku (w kolorach zgodnych z rysunkiem ESP32-CAM)

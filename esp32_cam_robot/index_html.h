@@ -68,11 +68,11 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   .sep{border-top:1px solid rgba(255,255,255,.1)}
   #mreset,.mreset{height:38px;border-radius:8px;border:1px solid rgba(255,140,120,.5);background:transparent;color:#ff9c8a;font-size:14px}
   .note{font-size:11px;color:#8a949c;margin:0}
-  .tabs{display:flex;gap:4px;padding:8px 14px 0}
-  .tabs button{flex:1;height:34px;border-radius:8px 8px 0 0;border:1px solid rgba(255,255,255,.2);border-bottom:0;
+  .tabs{display:flex;flex-wrap:wrap;gap:4px;padding:8px 14px;border-bottom:1px solid rgba(255,255,255,.1)}
+  .tabs button{flex:1 1 auto;padding:0 8px;height:30px;border-radius:8px;border:1px solid rgba(255,255,255,.2);
     background:transparent;color:#aab4bc;font-size:13px}
   .tabs button.on{background:rgba(255,255,255,.1);color:#fff}
-  .pinrow{display:grid;grid-template-columns:1fr 96px;gap:8px;align-items:center;font-size:13px;color:#cfd6dc}
+  .pinrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(96px,48%);gap:8px;align-items:center;font-size:13px;color:#cfd6dc}
   .msg{font-size:12px;line-height:1.4;padding:8px 10px;border-radius:8px}
   .msg.warn{background:rgba(255,200,80,.12);color:#ffd27a}
   .msg.err{background:rgba(255,90,80,.15);color:#ff9c8a}
@@ -119,6 +119,18 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   /* dwie strefy: lewa połowa = gaz, prawa = skręt; gałka pojawia się pod palcem */
   .zone{position:fixed;top:0;bottom:0;width:50%}
   #zl{left:0} #zr{right:0}
+  /* strefa rozglądania (serwa pan/tilt): środkowy pas między gałkami */
+  #zm{position:fixed;top:60px;bottom:50px;left:35%;width:30%;display:none}
+  body.look #zm{display:block}
+  body.look #zl{width:35%} body.look #zr{width:35%}
+  #lookhud{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.7);
+    background:rgba(0,0,0,.35);padding:3px 8px;border-radius:8px;white-space:nowrap;pointer-events:none}
+  /* przyciski z menu „Przyciski” */
+  #abtns{position:fixed;top:8px;right:8px;z-index:3;display:grid;grid-template-columns:repeat(4,46px);gap:6px;direction:rtl}
+  #abtns button{direction:ltr;width:46px;height:46px;border-radius:12px;border:2px solid rgba(255,255,255,.45);
+    background:rgba(0,0,0,.45);color:#fff;font-size:15px;font-weight:600;padding:0;overflow:hidden;touch-action:none}
+  #abtns button.on{background:rgba(80,170,255,.85);border-color:#8cc8ff}
+  @media (orientation:portrait){ #abtns{top:110px} }
   .base{position:absolute;border-radius:999px;border:3px solid rgba(255,255,255,.55);
     background:rgba(255,255,255,.07);transform:translate(-50%,-50%);pointer-events:none;transition:opacity .2s}
   .base.v{width:calc(var(--K) + 14px);height:calc(2 * var(--R) + var(--K) + 14px)}
@@ -146,6 +158,8 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <div id="rc" class="hud"></div>
 <div id="readout" class="hud">L 0 · P 0</div>
 
+<div class="zone" id="zm"><div id="lookhud">przeciągnij, aby obrócić kamerę · dwuklik = środek</div></div>
+<div id="abtns"></div>
 <div class="zone" id="zl"><div class="base v"><div class="knob"></div></div></div>
 <div class="zone" id="zr"><div class="base h"><div class="knob"></div></div></div>
 
@@ -161,7 +175,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
 <div id="menu" hidden>
   <div class="mhead">Ustawienia <button id="mclose" aria-label="Zamknij">&#10005;</button></div>
-  <div class="tabs"><button data-tab="obraz" class="on">Obraz</button><button data-tab="naped">Napęd</button><button data-tab="elrs">ELRS</button><button data-tab="wifi">Wi-Fi</button><button data-tab="sys">System</button></div>
+  <div class="tabs"><button data-tab="obraz" class="on">Obraz</button><button data-tab="naped">Napęd</button><button data-tab="elrs">ELRS</button><button data-tab="serwa">Serwa</button><button data-tab="przyciski">Przyciski</button><button data-tab="wifi">Wi-Fi</button><button data-tab="sys">System</button></div>
   <div class="mbody" id="tab-obraz">
     <div class="grp"><label>Szybki wybór</label>
       <div class="seg" id="presets"><button data-p="0">Płynnie</button><button data-p="1">Balans</button><button data-p="2">Jakość</button></div>
@@ -299,6 +313,37 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     <p class="note">Przypisanie kanałów działa od razu, zmiana pinu po ponownym uruchomieniu.</p>
   </div>
 
+  <div class="mbody" id="tab-serwa" hidden>
+    <button class="wbtn wshow">Schemat połączeń</button>
+    <div class="grp"><label>Moduł PCA9685 (16 wyjść przez I2C)</label>
+      <div class="pinrow"><span>SDA</span><select data-pin="sda"></select></div>
+      <div class="pinrow"><span>SCL</span><select data-pin="scl"></select></div>
+      <div class="pinrow"><span>Adres I2C</span><select data-hk="pa">
+        <option value="64">0x40</option><option value="65">0x41</option><option value="66">0x42</option><option value="67">0x43</option>
+        <option value="68">0x44</option><option value="69">0x45</option><option value="70">0x46</option><option value="71">0x47</option>
+      </select></div>
+      <div class="pinrow"><span>Częstotliwość PWM</span><select data-hk="pq">
+        <option value="50">50 Hz (serwa)</option><option value="60">60 Hz</option><option value="100">100 Hz</option>
+        <option value="200">200 Hz</option><option value="300">300 Hz</option><option value="500">500 Hz</option><option value="1000">1000 Hz</option>
+      </select></div>
+      <div class="msg" id="pcast"></div>
+      <p class="note">Moduł zajmuje 2 piny, a daje 16 kanałów: na serwa, silniki, diodę i wyjścia przycisków. Częstotliwość jest wspólna dla wszystkich kanałów – zwykłe serwa potrzebują 50 Hz.</p>
+    </div>
+    <div class="grp" id="servos"></div>
+    <div class="grp" id="iomsg"></div>
+    <button class="primary hwreboot">Zapisz i uruchom ponownie</button>
+    <p class="note">Wyjścia serw i moduł PCA zaczną działać po ponownym uruchomieniu. Zakres, środek, prędkość i sterowanie – od razu.</p>
+    <button class="mreset" id="ioreset">Przywróć domyślne serwa i przyciski</button>
+  </div>
+
+  <div class="mbody" id="tab-przyciski" hidden>
+    <p class="note">Przyciski pojawiają się w prawym górnym rogu ekranu. Każdy można też wyzwalać przełącznikiem aparatury.</p>
+    <div class="grp" id="acts"></div>
+    <div class="grp" id="actmsg"></div>
+    <button class="primary hwreboot">Zapisz i uruchom ponownie</button>
+    <p class="note">Zmiana wyjścia przycisku działa po ponownym uruchomieniu, reszta od razu.</p>
+  </div>
+
   <div class="mbody" id="tab-wifi" hidden>
     <div class="grp" id="wst"></div>
     <div class="grp"><label>Tryb</label>
@@ -342,7 +387,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     <div class="grp"><label>Kopia ustawień</label>
       <div class="inrow"><button class="small" id="bkdown">Zapisz do pliku</button><button class="small" id="bkpick">Wczytaj z pliku</button></div>
       <input type="file" id="bkfile" accept=".json,application/json" hidden>
-      <p class="note">Plik zawiera ustawienia obrazu, napędu, aparatury i Wi-Fi, bez haseł.</p>
+      <p class="note">Plik zawiera ustawienia obrazu, napędu, aparatury, serw, przycisków i Wi-Fi, bez haseł.</p>
       <div class="grp" id="bkmsg"></div>
     </div>
     <div class="sep"></div>
@@ -379,9 +424,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       if (p[0] === 'V') return showChannels(p);
       if (p[0] !== 'R') return;
       if (p.length >= 9) showWheels([+p[5], +p[6], +p[7], +p[8]]);
+      if (p.length >= 10 && +p[9] !== actMaskNow){ actMaskNow = +p[9]; markButtons(); }
       showRc(+p[1]);
       var l = p[2] === '1';
-      if (l !== light){ light = l; lightEl.classList.toggle('on', light); }
+      if (l !== light){ light = l; lightEl.classList.toggle('on', light); markButtons(); }
       if (p[3] !== undefined) stxt.textContent = 'połączono · ' + p[3] + ' fps' + (p[4] ? ' · ' + p[4] + ' KB' : '');
     };
     ws.onclose = function(){ showRc(0); dot.className = ''; stxt.textContent = 'rozłączono'; setTimeout(connect, 1000); };
@@ -399,7 +445,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
   // ---------- moc ----------
   var speed = 70, spdEl = document.getElementById('spd');
-  function setSpeed(v){ speed = Math.max(20, Math.min(100, v)); spdEl.textContent = speed + '%'; }
+  function setSpeed(v){ speed = Math.max(20, Math.min(100, v)); spdEl.textContent = speed + '%'; markButtons(); }
   tap('up', function(){ setSpeed(speed + 10); });
   tap('down', function(){ setSpeed(speed - 10); });
 
@@ -419,9 +465,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   for (var ti = 0; ti < tabBtns.length; ti++) tabBtns[ti].addEventListener('click', function(){
     tab = this.dataset.tab;
     for (var j = 0; j < tabBtns.length; j++) tabBtns[j].classList.toggle('on', tabBtns[j] === this);
-    ['obraz', 'naped', 'elrs', 'wifi', 'sys'].forEach(function(t){ document.getElementById('tab-' + t).hidden = t !== tab; });
+    ['obraz', 'naped', 'elrs', 'serwa', 'przyciski', 'wifi', 'sys'].forEach(function(t){ document.getElementById('tab-' + t).hidden = t !== tab; });
     if (tab === 'sys') loadSys();
-    if (tab === 'naped' || tab === 'elrs') loadHw();
+    if (tab === 'naped' || tab === 'elrs' || tab === 'serwa' || tab === 'przyciski') loadHw();
     if (tab === 'wifi') loadWifi();
   });
   document.getElementById('mclose').addEventListener('click', function(){ menu.hidden = true; });
@@ -644,9 +690,11 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   var INV_LABELS = { tank: ['Lewa strona', 'Prawa strona'], mec: ['Lewe przednie', 'Prawe przednie', 'Lewe tylne', 'Prawe tylne'] };
   var CH_FUNCS = ['Skręt / obrót', 'Jazda przód/tył', 'Jazda bokiem (Mecanum)', 'Moc (gaz)', 'Przejęcie sterowania (uzbrojenie)', 'Światło'];
 
+  var ioS = null;
   function loadHw(){
-    fetch('/hw', { cache: 'no-store' }).then(function(r){ return r.json(); })
-      .then(function(j){ hwS = j; applyMode(); renderHw(); }).catch(function(){});
+    Promise.all([fetch('/hw', { cache: 'no-store' }).then(function(r){ return r.json(); }),
+                 fetch('/io', { cache: 'no-store' }).then(function(r){ return r.json(); }).catch(function(){ return null; })])
+      .then(function(r){ hwS = r[0]; if (r[1]) ioS = r[1]; applyMode(); renderHw(); renderIo(); }).catch(function(){});
   }
   // tryb gałek i przycisk światła zależą od konfiguracji aktywnej od startu robota
   function applyMode(){
@@ -661,20 +709,56 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     clearTimeout(hwTimer);
     hwTimer = setTimeout(loadHw, 400);   // odśwież stan (np. czy potrzebny restart)
   }
-  function pinOptions(sel, val, allowNone){
+  function pcaCfg(){ return hwS && hwS.sda >= 0 && hwS.scl >= 0 && hwS.sda !== hwS.scl; }
+  // pca: czy pokazać kanały PCA9685 (wyjścia PWM); bez PCA – tylko piny ESP32
+  function pinOptions(sel, val, allowNone, pca){
     var h = allowNone ? '<option value="-1">brak</option>' : '';
     FREE_PINS.forEach(function(p){ h += '<option value="' + p + '">' + gp(p) + (p === 4 ? ' – dioda' : '') + '</option>'; });
+    if (pca && (pcaCfg() || val >= 100)) for (var c = 0; c < 16; c++) h += '<option value="' + (100 + c) + '">PCA kanał ' + c + '</option>';
     sel.innerHTML = h;
     sel.value = String(val);
   }
+
+  // Kto zajmuje który pin / kanał – w kolejności ważności, jak w firmware (pierwszy wygrywa)
+  var SV_COL = '#b7e36b', OUT_COL = '#e3a36b', I2C_COL = '#4fd1c5';
+  function usage(){
+    var list = [], taken = {}, gpioServos = 0, mec = hwS.mode === 1, n = mec ? 8 : 4;
+    var tb = hwS.drv === 1, IN = tb ? ['AIN1', 'AIN2', 'BIN1', 'BIN2'] : ['IN1', 'IN2', 'IN3', 'IN4'];
+    var WH = mec ? ['LP', 'PP', 'LT', 'PT'] : ['lewa', 'prawa'];
+    function add(p, name, short, kind, color, ix){
+      var it = { p: p, name: name, short: short, kind: kind, c: color, ok: true, why: '', ix: ix };
+      if (p < 0) return;
+      if (p >= 100 && !pcaCfg()){ it.ok = false; it.why = 'nopca'; }
+      else if (taken[p]){ it.ok = false; it.why = 'conflict'; it.owner = taken[p].name; }
+      else if (kind === 'servo' && p < 100 && gpioServos >= 2){ it.ok = false; it.why = 'limit'; }
+      else { taken[p] = it; if (kind === 'servo' && p < 100) gpioServos++; }
+      list.push(it);
+    }
+    if (pcaCfg()){ add(hwS.sda, 'PCA9685 SDA', 'SDA (PCA9685)', 'i2c', I2C_COL); add(hwS.scl, 'PCA9685 SCL', 'SCL (PCA9685)', 'i2c', I2C_COL); }
+    for (var i = 0; i < n; i++)
+      add(hwS.p[i], 'silnik ' + WH[i >> 1] + ' (' + IN[i % 4] + ')', (mec ? (i < 4 ? '#1 ' : '#2 ') : '') + IN[i % 4] + ' · ' + WH[i >> 1], 'motor', WCOL[i >> 1]);
+    add(hwS.lp, 'dioda', hwS.lp === 4 ? 'dioda (na płytce)' : 'dioda', 'light', C_LED);
+    if (hwS.rp >= 100) hwS.rp = -1;
+    add(hwS.rp, 'odbiornik ELRS', 'ELRS TX', 'rc', C_RC);
+    if (ioS){
+      ioS.s.forEach(function(sv, i){ add(sv.o, 'serwo „' + sv.n + '”', 'serwo ' + sv.n, 'servo', SV_COL, i); });
+      ioS.a.forEach(function(a, i){ if (a.t === 2) add(a.o, 'wyjście przycisku ' + (a.l || i + 1), 'wyjście ' + (a.l || 'przycisk ' + (i + 1)), 'out', OUT_COL, i); });
+    }
+    return { list: list, taken: taken };
+  }
   function hwMessages(){
-    var err = [], warn = [], n = hwS.mode === 1 ? 8 : 4, mp = hwS.p.slice(0, n);
-    mp.forEach(function(p, i){ if (mp.indexOf(p) !== i) err.push('Pin ' + gp(p) + ' jest użyty dla dwóch wejść.'); });
-    if (mp.indexOf(-1) >= 0) err.push('Każde wejście L298N musi mieć wybrany pin.');
-    if (hwS.lp >= 0 && mp.indexOf(hwS.lp) >= 0) warn.push('Dioda będzie wyłączona: pin ' + gp(hwS.lp) + ' zajmują silniki.');
-    if (hwS.rp >= 0 && mp.indexOf(hwS.rp) >= 0) warn.push('Odbiornik ELRS będzie wyłączony: pin ' + gp(hwS.rp) + ' zajmują silniki.');
-    if (hwS.rp >= 0 && hwS.rp === hwS.lp) warn.push('Dioda i odbiornik mają ten sam pin – odbiornik będzie wyłączony.');
-    var all = mp.concat([hwS.lp, hwS.rp]);
+    var err = [], warn = [], n = hwS.mode === 1 ? 8 : 4, mp = hwS.p.slice(0, n), u = usage();
+    if (mp.indexOf(-1) >= 0) err.push('Każde wejście sterownika silników musi mieć wybrany pin.');
+    if (hwS.sda >= 0 && hwS.sda === hwS.scl) err.push('SDA i SCL modułu PCA9685 muszą być na różnych pinach.');
+    u.list.forEach(function(it){
+      if (it.ok) return;
+      var why = it.why === 'nopca' ? 'kanał PCA wymaga modułu PCA9685 – ustaw piny SDA i SCL w zakładce Serwa'
+        : it.why === 'limit' ? 'na pinach ESP32 działają najwyżej 2 serwa – użyj PCA9685'
+        : 'pin ' + gp(it.p) + ' zajmuje już ' + it.owner;
+      if (it.kind === 'motor' || it.kind === 'i2c') err.push(it.name[0].toUpperCase() + it.name.slice(1) + ': ' + why + '. Robot uruchomi się z domyślnymi pinami.');
+      else warn.push(it.name[0].toUpperCase() + it.name.slice(1) + ' będzie wyłączone: ' + why + '.');
+    });
+    var all = u.list.filter(function(it){ return it.ok; }).map(function(it){ return it.p; });
     if (all.indexOf(1) >= 0 || all.indexOf(3) >= 0)
       warn.push('U0T (IO1) i U0R (IO3) to piny programatora: Serial Monitor zostanie wyłączony, a przy wgrywaniu programu odłącz przewody z tych pinów.');
     if (mp.indexOf(1) >= 0) warn.push('U0T (IO1) przy starcie wysyła dane – podłączony silnik może na chwilę drgnąć.');
@@ -682,14 +766,17 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     if (all.indexOf(2) >= 0) warn.push('IO2: przy wgrywaniu programu odłącz od niego przewód.');
     if (all.indexOf(12) >= 0) warn.push('IO12 musi mieć stan niski przy starcie – jeśli robot nie startuje, dodaj rezystor 10 kΩ do GND.');
     if (hwS.drv === 1 && hwS.md > 70) warn.push('TB6612 nie traci napięcia jak L298N – zmniejsz minimalną moc startową do ok. 40–60.');
-    if (hwS.mode === 1) warn.push('Mecanum potrzebuje 8 pinów, czyli wszystkich wolnych – nie zostaje pin dla odbiornika ELRS.');
+    if (hwS.mode === 1 && mp.every(function(p){ return p < 100; }))
+      warn.push('Mecanum na pinach ESP32 zajmuje wszystkie 8 wolnych pinów. Z modułem PCA9685 silniki przejdą na jego kanały i zwolnią piny dla ELRS, diody i serw.');
+    if (ioS && ioS.s.some(function(sv){ return sv.o === 1; })) warn.push('Serwo na U0T (IO1) może drgnąć przy włączaniu robota.');
+    if (pcaCfg() && !hwS.pcaOk && !hwS.pending) warn.push('Moduł PCA9685 nie odpowiada – sprawdź przewody SDA/SCL, zasilanie VCC i adres.');
     return { err: err, warn: warn };
   }
   function msgHtml(m){
     var h = '';
     m.err.forEach(function(t){ h += '<div class="msg err">' + t + '</div>'; });
     m.warn.forEach(function(t){ h += '<div class="msg warn">' + t + '</div>'; });
-    if (hwS.pending && !m.err.length) h += '<div class="msg ok">Zmiany zapisane – uruchom robota ponownie, żeby zaczęły działać.</div>';
+    if ((hwS.pending || (ioS && ioS.pending)) && !m.err.length) h += '<div class="msg ok">Zmiany zapisane – uruchom robota ponownie, żeby zaczęły działać.</div>';
     return h;
   }
   function hwFmt(k, v){
@@ -717,9 +804,15 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     var pins = document.getElementById('pins'), pkey = key + hwS.drv;
     if (pins.dataset.key !== pkey){ pins.innerHTML = ph; pins.dataset.key = pkey; }
     var sels = pins.querySelectorAll('select');
-    for (var k = 0; k < sels.length; k++) pinOptions(sels[k], hwS.p[k], false);
-    pinOptions(document.getElementById('lp'), hwS.lp, true);
-    pinOptions(document.getElementById('rp'), hwS.rp, true);
+    for (var k = 0; k < sels.length; k++) pinOptions(sels[k], hwS.p[k], false, true);
+    pinOptions(document.getElementById('lp'), hwS.lp, true, true);
+    pinOptions(document.getElementById('rp'), hwS.rp, true, false);
+    pinOptions(menu.querySelector('[data-pin="sda"]'), hwS.sda, true, false);
+    pinOptions(menu.querySelector('[data-pin="scl"]'), hwS.scl, true, false);
+    var pst = document.getElementById('pcast');
+    pst.className = 'msg ' + (!pcaCfg() ? 'warn' : hwS.pcaOk ? 'ok' : 'err');
+    pst.textContent = !pcaCfg() ? 'Moduł wyłączony – wybierz piny SDA i SCL.'
+      : hwS.pcaOk ? 'Moduł PCA9685 działa.' : hwS.pending ? 'Uruchom robota ponownie, żeby włączyć moduł.' : 'Moduł nie odpowiada.';
     var ih = '';
     INV_LABELS[key].forEach(function(l, i){
       ih += '<div class="row"><label for="inv' + i + '">' + l + '</label><input type="checkbox" id="inv' + i + '" data-inv="' + i + '"' + (hwS.inv[i] ? ' checked' : '') + '></div>';
@@ -732,10 +825,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     document.getElementById('md').value = hwS.md;
     document.getElementById('mdv').textContent = hwS.md;
     var m = hwMessages(), html = msgHtml(m);
-    document.getElementById('hwmsg').innerHTML = html;
-    document.getElementById('rcmsg').innerHTML = html;
-    var rb = menu.querySelectorAll('.hwreboot');
-    for (var b = 0; b < rb.length; b++) rb[b].disabled = !hwS.pending || m.err.length > 0;
+    ['hwmsg', 'rcmsg', 'iomsg', 'actmsg'].forEach(function(id){ document.getElementById(id).innerHTML = html; });
+    var rb = menu.querySelectorAll('.hwreboot'), pend = hwS.pending || (ioS && ioS.pending);
+    for (var b = 0; b < rb.length; b++) rb[b].disabled = !pend || m.err.length > 0;
     // przypisanie kanałów
     var ch = '';
     CH_FUNCS.forEach(function(f, i){
@@ -762,7 +854,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     var t = e.target;
     if (t.dataset.pin){
       var v = +t.value;
-      if (t.dataset.pin === 'lp' || t.dataset.pin === 'rp') hwS[t.dataset.pin] = v; else hwS.p[+t.dataset.pin.slice(1)] = v;
+      if (/^p\d$/.test(t.dataset.pin)) hwS.p[+t.dataset.pin.slice(1)] = v; else hwS[t.dataset.pin] = v;
       setHw(t.dataset.pin, v); renderHw();
     } else if (t.dataset.inv !== undefined){
       hwS.inv[+t.dataset.inv] = t.checked ? 1 : 0;
@@ -817,7 +909,12 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     rcst.textContent = !active ? 'Odbiornik wyłączony – brak pinu albo pin zajęty.'
       : conn ? 'Aparatura połączona · LQ ' + p[3] + '%' : 'Brak sygnału z aparatury.';
     var used = {};
-    if (hwS) hwS.c.forEach(function(c, i){ if (c && (i !== 2 || hwS.mode === 1)) used[c] = (used[c] ? used[c] + ', ' : '') + CH_FUNCS[i]; });
+    function tagCh(c, t){ if (c) used[c] = (used[c] ? used[c] + ', ' : '') + t; }
+    if (hwS) hwS.c.forEach(function(c, i){ if (i !== 2 || hwS.mode === 1) tagCh(c, CH_FUNCS[i]); });
+    if (ioS){
+      ioS.s.forEach(function(sv){ if (sv.ct === 3) tagCh(sv.ch, 'serwo ' + sv.n); });
+      ioS.a.forEach(function(a, i){ if (a.t) tagCh(a.ch, 'przycisk ' + (a.l || i + 1)); });
+    }
     for (var c = 1; c <= 16; c++){
       var row = document.getElementById('chv' + c);
       if (!row) return;
@@ -832,6 +929,189 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   }
   loadHw();
 
+  // ---------- serwa i przyciski (menu) ----------
+  var SV_CTRL = ['tylko przyciski', 'przeciąganie obrazu w poziomie (pan)', 'przeciąganie obrazu w pionie (tilt)', 'kanał aparatury'];
+  var ACT_TYPES = ['— nieużywany —', 'Światło – włącz/wyłącz', 'Wyjście – włącz/wyłącz', 'Serwo – pozycja', 'Kamera – na środek',
+                   'Moc – ustaw', 'Turbo – 100% przytrzymane'];
+  var ACT_ICON = ['', '💡', '⏻', '↔', '◎', '%', '🚀'];
+  function opt(list, v){ return list.map(function(t, i){ return '<option value="' + i + '"' + (i === v ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join(''); }
+  function chOpts(v){
+    var h = '<option value="0">brak</option>';
+    for (var c = 1; c <= 16; c++) h += '<option value="' + c + '"' + (c === v ? ' selected' : '') + '>CH' + c + (c >= 5 && c <= 12 ? ' (AUX' + (c - 4) + ')' : '') + '</option>';
+    return h;
+  }
+  function rngFmt(u, v){ return u === 'sp' ? (v ? v * 10 + '°/s' : 'natychmiast') : v + u; }
+  function rng(label, attr, key, v, min, max, step, u){
+    return '<div class="grp"><label>' + label + ' <span class="val" data-u="' + u + '">' + rngFmt(u, v) + '</span></label>' +
+      '<input type="range" ' + attr + '="' + key + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + v + '"></div>';
+  }
+  var ioTimer = null;
+  function ioReload(){ clearTimeout(ioTimer); ioTimer = setTimeout(loadHw, 350); }
+
+  function renderIo(){
+    if (!ioS || !hwS) return;
+    var u = usage(), h = '';
+    ioS.s.forEach(function(sv, i){
+      var st = u.list.filter(function(it){ return it.kind === 'servo' && it.ix === i; })[0];
+      h += '<div class="wcard" data-s="' + i + '"><div class="inrow"><input type="text" data-sk="n" maxlength="11" value="' + esc(sv.n) + '"></div>' +
+        '<div class="pinrow"><span>Wyjście (sygnał)</span><select data-sk="o"></select></div>';
+      if (sv.o >= 0){
+        h += '<div class="pinrow"><span>Sterowanie</span><select data-sk="ct">' + opt(SV_CTRL, sv.ct) + '</select></div>';
+        if (sv.ct === 3) h += '<div class="pinrow"><span>Kanał aparatury</span><select data-sk="ch">' + chOpts(sv.ch) + '</select></div>';
+        h += rng('Najmniej', 'data-sk', 'mn', sv.mn, 0, 180, 1, '°') + rng('Najwięcej', 'data-sk', 'mx', sv.mx, 0, 180, 1, '°') +
+             rng('Środek', 'data-sk', 'c', sv.c, 0, 180, 1, '°') + rng('Prędkość', 'data-sk', 'sp', sv.sp, 0, 30, 1, 'sp');
+        h += '<div class="row"><label>Odwróć kierunek</label><input type="checkbox" data-sk="inv"' + (sv.inv ? ' checked' : '') + '></div>';
+        h += '<div class="inrow"><button class="small" data-test="mn">◀ min</button><button class="small" data-test="c">środek</button><button class="small" data-test="mx">max ▶</button></div>';
+        if (st && !st.ok) h += '<p class="wnote">Nieaktywne – szczegóły niżej.</p>';
+        else if (!sv.ok) h += '<p class="wnote">Zacznie działać po ponownym uruchomieniu robota.</p>';
+      }
+      h += '</div>';
+    });
+    $('servos').innerHTML = h;
+    $('servos').querySelectorAll('[data-sk="o"]').forEach(function(sel){ pinOptions(sel, ioS.s[+sel.closest('[data-s]').dataset.s].o, true, true); });
+
+    h = '';
+    ioS.a.forEach(function(a, i){
+      h += '<div class="wcard" data-a="' + i + '"><div class="pinrow"><b>Przycisk ' + (i + 1) + '</b><select data-ak="t">' + opt(ACT_TYPES, a.t) + '</select></div>';
+      if (a.t){
+        h += '<div class="pinrow"><span>Napis (np. emoji)</span><input type="text" data-ak="l" maxlength="7" value="' + esc(a.l) + '" placeholder="' + ACT_ICON[a.t] + '"></div>';
+        h += '<div class="row"><label>Pokaż na ekranie</label><input type="checkbox" data-ak="sh"' + (a.sh ? ' checked' : '') + '></div>';
+        if (a.t === 2 || a.t === 3) h += '<div class="pinrow"><span>Działanie</span><select data-ak="m">' + opt(['przełącznik (klik włącza i wyłącza)', 'tylko przytrzymany'], a.m) + '</select></div>';
+        if (a.t === 2) h += '<div class="pinrow"><span>Wyjście</span><select data-ak="o"></select></div>';
+        if (a.t === 3) h += '<div class="pinrow"><span>Serwo</span><select data-ak="sv">' + opt(ioS.s.map(function(x){ return x.n; }), a.sv) + '</select></div>' +
+          rng('Pozycja po włączeniu', 'data-ak', 'a', a.a, 0, 180, 1, '°') + rng('Pozycja po wyłączeniu', 'data-ak', 'b', a.b, 0, 180, 1, '°');
+        if (a.t === 5) h += rng('Moc', 'data-ak', 'a', Math.max(20, Math.min(100, a.a)), 20, 100, 10, '%');
+        if (a.t >= 1 && a.t <= 4) h += '<div class="pinrow"><span>Też z kanału aparatury</span><select data-ak="ch">' + chOpts(a.ch) + '</select></div>';
+      }
+      h += '</div>';
+    });
+    $('acts').innerHTML = h;
+    $('acts').querySelectorAll('[data-ak="o"]').forEach(function(sel){ pinOptions(sel, ioS.a[+sel.closest('[data-a]').dataset.a].o, true, true); });
+    renderButtons();
+    updateLook();
+  }
+
+  // zmiany w kartach serw i przycisków
+  function utf8Cut(t, n){ while (new TextEncoder().encode(t).length > n) t = t.slice(0, -1); return t; }
+  menu.addEventListener('change', function(e){
+    var t = e.target, sk = t.dataset.sk, ak = t.dataset.ak;
+    if (!sk && !ak) return;
+    var card = t.closest(sk ? '[data-s]' : '[data-a]'), i = +(sk ? card.dataset.s : card.dataset.a), key = sk || ak, v, sendV;
+    if (t.type === 'checkbox'){ v = t.checked ? 1 : 0; sendV = v; }
+    else if (t.type === 'text'){ v = utf8Cut(t.value.trim(), key === 'n' ? 11 : 7); t.value = v; sendV = encodeURIComponent(v); }
+    else { v = +t.value; sendV = v; }
+    (sk ? ioS.s : ioS.a)[i][key] = v;
+    send((sk ? 'S ' : 'A ') + i + ' ' + key + ' ' + sendV);
+    if (sk && key === 'c'){ lookPos[i] = v; }
+    ioReload();
+  });
+  menu.addEventListener('input', function(e){
+    var t = e.target;
+    if (t.type !== 'range' || !(t.dataset.sk || t.dataset.ak)) return;
+    var sh = t.parentNode.querySelector('[data-u]');
+    if (sh) sh.textContent = rngFmt(sh.dataset.u, +t.value);
+    // podgląd na żywo: serwo jedzie za suwakiem zakresu / środka
+    if (t.dataset.sk && /^(mn|mx|c)$/.test(t.dataset.sk)) send('S ' + t.closest('[data-s]').dataset.s + ' p ' + t.value);
+  });
+  menu.addEventListener('click', function(e){
+    var k = e.target.dataset.test;
+    if (!k) return;
+    var i = +e.target.closest('[data-s]').dataset.s;
+    send('S ' + i + ' p ' + ioS.s[i][k]);
+    lookPos[i] = ioS.s[i][k];
+  });
+  document.getElementById('ioreset').addEventListener('click', function(){ send('S 0 reset 1'); ioReload(); });
+
+  // ---------- przyciski na ekranie ----------
+  var actMaskNow = 0, turboPrev = null, turboIdx = -1;
+  function renderButtons(){
+    var h = '';
+    if (ioS) ioS.a.forEach(function(a, i){
+      if (a.t && a.sh) h += '<button data-b="' + i + '">' + esc(a.l || (a.t === 5 ? a.a + '%' : ACT_ICON[a.t])) + '</button>';
+    });
+    $('abtns').innerHTML = h;
+    markButtons();
+  }
+  function markButtons(){
+    if (!ioS) return;
+    var bs = document.querySelectorAll('#abtns [data-b]');
+    for (var k = 0; k < bs.length; k++){
+      var i = +bs[k].dataset.b, a = ioS.a[i];
+      var on = a.t === 1 ? light : a.t === 6 ? turboIdx === i : a.t === 5 ? speed === a.a : !!((actMaskNow >> i) & 1);
+      bs[k].classList.toggle('on', on);
+    }
+  }
+  function pressAct(i, down){
+    var a = ioS.a[i];
+    if (a.t === 5){ if (down) setSpeed(a.a); }
+    else if (a.t === 6){
+      if (down && turboIdx < 0){ turboPrev = speed; turboIdx = i; setSpeed(100); }
+      else if (!down && turboIdx === i){ turboIdx = -1; setSpeed(turboPrev); }
+    }
+    else send('B ' + i + ' ' + (down ? 1 : 0));
+    markButtons();
+  }
+  var abtns = document.getElementById('abtns'), heldBtn = {};
+  abtns.addEventListener('pointerdown', function(e){
+    var b = e.target.closest('[data-b]');
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    try { b.setPointerCapture(e.pointerId); } catch (err) {}
+    heldBtn[e.pointerId] = +b.dataset.b;
+    pressAct(+b.dataset.b, true);
+  });
+  function btnUp(e){
+    if (heldBtn[e.pointerId] === undefined) return;
+    pressAct(heldBtn[e.pointerId], false);
+    delete heldBtn[e.pointerId];
+  }
+  abtns.addEventListener('pointerup', btnUp);
+  abtns.addEventListener('pointercancel', btnUp);
+
+  // ---------- rozglądanie: przeciąganie po obrazie steruje serwami pan / tilt ----------
+  var zm = document.getElementById('zm'), lookHud = document.getElementById('lookhud');
+  var lookPos = {}, lookDrag = null, lookSent = 0, lastTap = 0, LOOK_K = 0.3;   // stopnie na piksel
+  function lookServos(role){
+    return ioS ? ioS.s.map(function(sv, i){ return { s: sv, i: i }; }).filter(function(x){ return x.s.ct === role && x.s.ok; }) : [];
+  }
+  function updateLook(){
+    var on = lookServos(1).length + lookServos(2).length > 0;
+    if (document.body.classList.contains('look') !== on){
+      document.body.classList.toggle('look', on);
+      window.dispatchEvent(new Event('resize'));    // gałki wracają na środek swoich (węższych) stref
+    }
+    ioS.s.forEach(function(sv, i){ if (lookPos[i] === undefined) lookPos[i] = sv.pos; });
+  }
+  function lookSend(){
+    lookServos(1).concat(lookServos(2)).forEach(function(x){ send('S ' + x.i + ' p ' + Math.round(lookPos[x.i])); });
+    lookSent = Date.now();
+    var pan = lookServos(1)[0], tilt = lookServos(2)[0];
+    lookHud.textContent = (pan ? 'pan ' + Math.round(lookPos[pan.i]) + '°' : '') + (pan && tilt ? ' · ' : '') + (tilt ? 'tilt ' + Math.round(lookPos[tilt.i]) + '°' : '');
+  }
+  zm.addEventListener('pointerdown', function(e){
+    e.preventDefault();
+    var now = Date.now();
+    if (now - lastTap < 300){          // dwuklik – kamera na środek
+      lookServos(1).concat(lookServos(2)).forEach(function(x){ lookPos[x.i] = x.s.c; });
+      lookSend();
+      lastTap = 0;
+      return;
+    }
+    lastTap = now;
+    try { zm.setPointerCapture(e.pointerId); } catch (err) {}
+    lookDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, start: Object.assign({}, lookPos) };
+  });
+  zm.addEventListener('pointermove', function(e){
+    if (!lookDrag || e.pointerId !== lookDrag.id) return;
+    var dx = (e.clientX - lookDrag.x) * LOOK_K, dy = (e.clientY - lookDrag.y) * LOOK_K;
+    lookServos(1).forEach(function(x){ lookPos[x.i] = Math.max(x.s.mn, Math.min(x.s.mx, lookDrag.start[x.i] + dx)); });
+    lookServos(2).forEach(function(x){ lookPos[x.i] = Math.max(x.s.mn, Math.min(x.s.mx, lookDrag.start[x.i] - dy)); });
+    if (Date.now() - lookSent > 40) lookSend();
+  });
+  function lookEnd(e){ if (lookDrag && e.pointerId === lookDrag.id){ lookSend(); lookDrag = null; } }
+  zm.addEventListener('pointerup', lookEnd);
+  zm.addEventListener('pointercancel', lookEnd);
+
   // ---------- schemat połączeń ----------
   // Układ pinów płytki ESP32-CAM (AI-Thinker), widok od strony kamery
   var BOARD_L = [['5V', 'p5v'], ['GND', 'gnd'], ['IO12', 12], ['IO13', 13], ['IO15', 15], ['IO14', 14], ['IO2', 2], ['IO4', 4]];
@@ -844,21 +1124,20 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     var m = {}, mec = hwS.mode === 1, tb = hwS.drv === 1, n = mec ? 8 : 4;
     var IN = tb ? ['AIN1', 'AIN2', 'BIN1', 'BIN2'] : ['IN1', 'IN2', 'IN3', 'IN4'];
     var WH = mec ? ['LP', 'PP', 'LT', 'PT'] : ['lewa', 'prawa'];   // skróty – pełne nazwy w kartach
-    function add(pin, text, color){
-      if (m[pin]){ m[pin] = { t: '⚠ ' + m[pin].t + ' + ' + text, c: '#ff4d4d', bad: true }; return; }
-      m[pin] = { t: text, c: color };
-    }
-    for (var i = 0; i < n; i++){
-      var mod = mec ? (i < 4 ? '#1 ' : '#2 ') : '';
-      add(hwS.p[i], mod + IN[i % 4] + ' · ' + WH[i >> 1], WCOL[i >> 1]);
-    }
-    // dioda / odbiornik na pinie silnika robot po prostu wyłącza – to nie błąd
-    var motorPins = hwS.p.slice(0, n);
-    if (hwS.lp >= 0 && motorPins.indexOf(hwS.lp) < 0) add(hwS.lp, hwS.lp === 4 ? 'dioda (na płytce)' : 'dioda', C_LED);
-    if (hwS.rp >= 0 && motorPins.indexOf(hwS.rp) < 0 && hwS.rp !== hwS.lp) add(hwS.rp, 'ELRS TX', C_RC);
-    m.p5v = { t: tb ? '← przetwornica 5 V' : '← +5V z L298N', c: C_PWR };
+    // piny ESP32: to, co działa; konflikt silników / I2C na czerwono, wyłączone dodatki pomijamy (opis w kartach)
+    usage().list.forEach(function(it){
+      if (it.p >= 100) return;
+      if (it.ok) m[it.p] = { t: it.short, c: it.c };
+      else if (it.why === 'conflict' && (it.kind === 'motor' || it.kind === 'i2c'))
+        m[it.p] = { t: '⚠ ' + (m[it.p] ? m[it.p].t : '') + ' + ' + it.short, c: '#ff4d4d', bad: true };
+    });
+    var p5 = tb || pcaCfg() || (ioS && ioS.s.some(function(sv){ return sv.o >= 0; }));
+    m.p5v = { t: p5 ? '← przetwornica 5 V' : '← +5V z L298N', c: C_PWR };
     m.gnd = { t: 'masa wspólna', c: C_GND };
-    m.p33 = tb ? { t: '→ VCC, STBY, PWMA/B', c: C_PWR } : { t: 'nie podłączaj', c: C_OFF };
+    var to33 = [];
+    if (tb) to33.push('TB6612');
+    if (pcaCfg()) to33.push('PCA VCC');
+    m.p33 = to33.length ? { t: '→ ' + to33.join(', '), c: C_PWR } : { t: 'nie podłączaj', c: C_OFF };
     m.x16 = { t: 'PSRAM – nie podłączaj', c: C_OFF };
     m.x0 = { t: 'kamera – nie podłączaj', c: C_OFF };
     m.vcc = { t: 'wyjście – nie zasilaj', c: C_OFF };
@@ -891,7 +1170,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   }
 
   function wrow(color, a, b){ return '<div class="wrow"><span class="dot" style="background:' + color + '"></span><b>' + a + '</b><span>' + b + '</span></div>'; }
-  function gp(p){ return p >= 0 ? (p === 1 ? 'U0T (IO1)' : p === 3 ? 'U0R (IO3)' : 'IO' + p) : '–'; }
+  function gp(p){ return p >= 100 ? 'PCA ' + (p - 100) : p >= 0 ? (p === 1 ? 'U0T (IO1)' : p === 3 ? 'U0R (IO3)' : 'IO' + p) : '–'; }
 
   // Rysunek modułu sterownika z opisem każdego pinu. pins: [x, y, strona l/r/b, nazwa, podłączenie, kolor]
   function moduleSvg(w, h, body, pins){
@@ -944,6 +1223,47 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     return moduleSvg(320, 216, body, pins);
   }
 
+  // PCA9685 (moduł jak Adafruit): listwa po lewej, kanały 0–15 na dole
+  function pcaCard(u){
+    if (!pcaCfg()) return '';
+    var body = '<rect x="66" y="10" width="240" height="150" rx="6" fill="#1d2a3a" stroke="#4f7fb0"/>' +
+      '<text x="186" y="70" fill="#9fc2e6" font-size="12" font-weight="600" text-anchor="middle">PCA9685</text>' +
+      '<text x="186" y="86" fill="#6f8fb0" font-size="9" text-anchor="middle">adres 0x' + hwS.pa.toString(16).toUpperCase() + ' · ' + hwS.pq + ' Hz</text>';
+    var L = [['GND', 'masa', C_GND], ['OE', 'wolny', C_OFF], ['SCL', gp(hwS.scl), I2C_COL], ['SDA', gp(hwS.sda), I2C_COL],
+             ['VCC', '3V3', C_PWR], ['V+', '5–6 V serwa', C_PWR]];
+    var pins = L.map(function(p, i){ return [70, 26 + i * 18, 'l', p[0], p[1], p[2]]; });
+    for (var c = 0; c < 16; c++){
+      var it = u.list.filter(function(x){ return x.p === 100 + c && x.ok; })[0];
+      pins.push([92 + c * 13, 150, 'b', String(c), it ? it.short.slice(0, 12) : '', it ? it.c : C_OFF]);
+    }
+    var h = '<div class="wcard"><h4>PCA9685 – 16 wyjść</h4>' + moduleSvg(320, 250, body, pins);
+    h += wrow(C_PWR, 'VCC ←', '3V3 z ESP32-CAM (logika)') + wrow(I2C_COL, 'SDA ←', gp(hwS.sda)) + wrow(I2C_COL, 'SCL ←', gp(hwS.scl));
+    h += wrow(C_PWR, 'V+ ←', '5–6 V z przetwornicy (zasilanie serw, zacisk śrubowy)') + wrow(C_GND, 'GND', 'masa wspólna');
+    h += '<p class="wnote">Każdy kanał ma 3 piny: sygnał (PWM), V+ i GND – wtyczka serwa pasuje wprost (żółty/pomarańczowy przewód do PWM).</p>';
+    if (!hwS.pcaOk && !hwS.pending) h += '<p class="wnote">Moduł nie odpowiada – sprawdź SDA/SCL, VCC i adres (zworki A0–A5).</p>';
+    return h + '</div>';
+  }
+  function servoCard(u){
+    var items = u.list.filter(function(x){ return x.kind === 'servo'; });
+    if (!items.length) return '';
+    var h = '<div class="wcard"><h4>Serwa</h4>';
+    items.forEach(function(it){
+      h += wrow(it.ok ? SV_COL : '#ff4d4d', ioS.s[it.ix].n, 'sygnał ← ' + gp(it.p) + (it.ok ? '' : ' – nieaktywne (' + (it.why === 'limit' ? 'za dużo serw na pinach ESP32' : it.why === 'nopca' ? 'brak PCA9685' : 'pin zajęty') + ')'));
+    });
+    h += wrow(C_PWR, '+ (czerwony)', items.some(function(x){ return x.p >= 100; }) ? 'V+ na PCA9685 albo 5 V z przetwornicy' : '5 V z przetwornicy');
+    h += wrow(C_GND, '− (brązowy)', 'masa wspólna');
+    h += '<p class="wnote">Serwo pobiera chwilowo do ok. 0,7 A. Zasilaj serwa z przetwornicy 5 V (min. 2 A), nie ze stabilizatora L298N ani z pinu 3V3 – inaczej ESP32 będzie się restartował.</p>';
+    return h + '</div>';
+  }
+  function outCard(u){
+    var items = u.list.filter(function(x){ return x.kind === 'out'; });
+    if (!items.length) return '';
+    var h = '<div class="wcard"><h4>Wyjścia przycisków</h4>';
+    items.forEach(function(it){ h += wrow(it.ok ? OUT_COL : '#ff4d4d', ioS.a[it.ix].l || 'przycisk ' + (it.ix + 1), gp(it.p) + (it.ok ? '' : ' – nieaktywne')); });
+    h += '<p class="wnote">Wyjście daje 3,3 V (pin ESP32 ok. 12 mA, kanał PCA ok. 25 mA). Diodę podłącz przez rezystor 220 Ω, a buzzer, silniczek czy przekaźnik – przez moduł z tranzystorem.</p>';
+    return h + '</div>';
+  }
+
   function wiringCards(m){
     var mods4 = hwS.mode !== 1 && hwS.mot === 4;
     var mec = hwS.mode === 1, tb = hwS.drv === 1, name = tb ? 'TB6612FNG' : 'L298N';
@@ -978,7 +1298,8 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     }
     if (tb) h += '<div class="wcard"><h4>Przetwornica 5 V (step-down)</h4>' +
       wrow(C_PWR, 'IN+ / IN− ←', 'akumulator') + wrow(C_PWR, 'OUT+ →', '5V ESP32-CAM') + wrow(C_GND, 'OUT− →', 'GND ESP32-CAM') + '</div>';
-    var mp = hwS.p.slice(0, mec ? 8 : 4);
+    var mp = hwS.p.slice(0, mec ? 8 : 4), u = usage();
+    h += pcaCard(u) + servoCard(u) + outCard(u);
     if (hwS.rp >= 0 && (mp.indexOf(hwS.rp) >= 0 || hwS.rp === hwS.lp))
       h += '<div class="wcard"><h4>Odbiornik ELRS</h4><p class="wnote">Wyłączony – pin ' + gp(hwS.rp) + ' jest zajęty' + (mec ? ' (Mecanum używa wszystkich wolnych pinów).' : '.') + '</p></div>';
     else if (hwS.rp >= 0) h += '<div class="wcard"><h4>Odbiornik ELRS</h4>' +
@@ -1132,14 +1453,19 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
   // kopia ustawień: plik JSON z obrazem, napędem, aparaturą i Wi-Fi (bez haseł)
   var CAM_KEYS = ['fs', 'q', 'br', 'ct', 'sa', 'wb', 'ae', 'al', 'ex', 'fx', 'hm', 'vf', 'rot', 'xc', 'gc', 'bpc', 'wpc', 'lenc'];
-  var HW_KEYS = ['mode', 'mot', 'md', 'lp', 'rp', 'pf', 'fo', 'rt', 'rv', 'tg', 'mp', 'ac', 'lt', 'dz', 'rd', 'rm', 'drv'];
+  var HW_KEYS = ['mode', 'mot', 'md', 'lp', 'rp', 'pf', 'fo', 'rt', 'rv', 'tg', 'mp', 'ac', 'lt', 'dz', 'rd', 'rm', 'drv', 'sda', 'scl', 'pa', 'pq'];
+  var SV_KEYS = ['n', 'o', 'mn', 'mx', 'c', 'inv', 'sp', 'ct', 'ch'], ACT_KEYS = ['t', 'm', 'o', 'sv', 'a', 'b', 'ch', 'sh', 'l'];
   function getJson(u){ return fetch(u, { cache: 'no-store' }).then(function(r){ return r.json(); }); }
   $('bkdown').addEventListener('click', function(){
-    Promise.all([getJson('/settings'), getJson('/hw'), getJson('/wifi'), getJson('/sys')]).then(function(r){
+    Promise.all([getJson('/settings'), getJson('/hw'), getJson('/wifi'), getJson('/sys'), getJson('/io')]).then(function(r){
       var out = { app: 'esp32-cam-robot', ver: r[3].ver, cam: {}, hw: { p: r[1].p, inv: r[1].inv, c: r[1].c }, wifi: {} };
       CAM_KEYS.forEach(function(k){ out.cam[k] = r[0][k]; });
       HW_KEYS.forEach(function(k){ out.hw[k] = r[1][k]; });
       ['mode', 'keep', 'ch', 'as', 'ss', 'hn'].forEach(function(k){ out.wifi[k] = r[2][k]; });
+      out.io = {
+        s: r[4].s.map(function(x){ var o = {}; SV_KEYS.forEach(function(k){ o[k] = x[k]; }); return o; }),
+        a: r[4].a.map(function(x){ var o = {}; ACT_KEYS.forEach(function(k){ o[k] = x[k]; }); return o; })
+      };
       var a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }));
       a.download = 'robot-ustawienia.json';
@@ -1159,6 +1485,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       (d.hw.p || []).forEach(function(v, i){ send('H p' + i + ' ' + v); });
       (d.hw.inv || []).forEach(function(v, i){ send('H inv' + i + ' ' + v); });
       (d.hw.c || []).forEach(function(v, i){ send('H c' + i + ' ' + v); });
+      if (d.io){
+        (d.io.s || []).forEach(function(x, i){ SV_KEYS.forEach(function(k){ if (x[k] !== undefined) send('S ' + i + ' ' + k + ' ' + (k === 'n' ? encodeURIComponent(x[k]) : x[k])); }); });
+        (d.io.a || []).forEach(function(x, i){ ACT_KEYS.forEach(function(k){ if (x[k] !== undefined) send('A ' + i + ' ' + k + ' ' + (k === 'l' ? encodeURIComponent(x[k]) : x[k])); }); });
+      }
       if (d.wifi) ['mode', 'keep', 'ch', 'as', 'ss', 'hn'].forEach(function(k){
         if (d.wifi[k] !== undefined) send('W ' + k + ' ' + encodeURIComponent(d.wifi[k]));
       });
