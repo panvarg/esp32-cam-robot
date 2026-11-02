@@ -427,30 +427,56 @@ static void camResetApplied() {      // stan czujnika zaraz po esp_camera_init()
   camApplied.vf = 0;
 }
 
+// Wywołanie funkcji czujnika tylko wtedy, gdy dany model ją ma (OV2640, OV3660, OV5640 różnią się)
+#define CAM_CALL(fn, ...) do { if (s->fn) s->fn(s, __VA_ARGS__); } while (0)
+
 static void camApplyAll() {
   if (!cameraOk) return;
   sensor_t *s = esp_camera_sensor_get();
+  if (!s) return;
   CamSettings &a = camApplied;
   // nigdy większa niż bufor z inicjalizacji; bez PSRAM tylko najmniejsza
   int fs = hasPsram ? min((int)cam.fs, camInitFs) : 0;
-  if (fs != a.fs)        s->set_framesize(s, FRAME_SIZES[fs]);
-  if (cam.q != a.q)      s->set_quality(s, cam.q);
-  if (cam.br != a.br)    s->set_brightness(s, cam.br);
-  if (cam.ct != a.ct)    s->set_contrast(s, cam.ct);
-  if (cam.sa != a.sa)    s->set_saturation(s, cam.sa);
-  if (cam.wb != a.wb)    s->set_wb_mode(s, cam.wb);
-  if (cam.ae != a.ae)    s->set_exposure_ctrl(s, cam.ae);
-  if (cam.al != a.al)    s->set_ae_level(s, cam.al);
-  if (!cam.ae && (cam.ex != a.ex || cam.ae != a.ae)) s->set_aec_value(s, cam.ex);
-  if (cam.fx != a.fx)    s->set_special_effect(s, cam.fx);
-  if (cam.hm != a.hm)    s->set_hmirror(s, cam.hm);
-  if (cam.vf != a.vf)    s->set_vflip(s, cam.vf);
-  if (cam.gc != a.gc && cam.gc >= 0) s->set_gainceiling(s, (gainceiling_t)cam.gc);
-  if (cam.bpc != a.bpc)  s->set_bpc(s, cam.bpc);
-  if (cam.wpc != a.wpc)  s->set_wpc(s, cam.wpc);
-  if (cam.lenc != a.lenc) s->set_lenc(s, cam.lenc);
+  if (fs != a.fs)        CAM_CALL(set_framesize, FRAME_SIZES[fs]);
+  if (cam.q != a.q)      CAM_CALL(set_quality, cam.q);
+  if (cam.br != a.br)    CAM_CALL(set_brightness, cam.br);
+  if (cam.ct != a.ct)    CAM_CALL(set_contrast, cam.ct);
+  if (cam.sa != a.sa)    CAM_CALL(set_saturation, cam.sa);
+  if (cam.wb != a.wb)    CAM_CALL(set_wb_mode, cam.wb);
+  if (cam.ae != a.ae)    CAM_CALL(set_exposure_ctrl, cam.ae);
+  if (cam.al != a.al)    CAM_CALL(set_ae_level, cam.al);
+  if (!cam.ae && (cam.ex != a.ex || cam.ae != a.ae)) CAM_CALL(set_aec_value, cam.ex);
+  if (cam.fx != a.fx)    CAM_CALL(set_special_effect, cam.fx);
+  if (cam.hm != a.hm)    CAM_CALL(set_hmirror, cam.hm);
+  if (cam.vf != a.vf)    CAM_CALL(set_vflip, cam.vf);
+  if (cam.gc != a.gc && cam.gc >= 0) CAM_CALL(set_gainceiling, (gainceiling_t)cam.gc);
+  if (cam.bpc != a.bpc)  CAM_CALL(set_bpc, cam.bpc);
+  if (cam.wpc != a.wpc)  CAM_CALL(set_wpc, cam.wpc);
+  if (cam.lenc != a.lenc) CAM_CALL(set_lenc, cam.lenc);
   a = cam;
   a.fs = fs;
+}
+
+// ---------- Kamera: wykryty model ----------
+static uint16_t camPid = 0;
+static bool camFresh = false;         // brak zapisanych ustawień obrazu – użyj domyślnych dla modelu
+
+static const char *camName() {
+  switch (camPid) {
+    case OV2640_PID: return "OV2640";
+    case OV3660_PID: return "OV3660";
+    case OV5640_PID: return "OV5640";
+    case 0:          return "brak";
+    default:         return "inna";
+  }
+}
+
+// Domyślne ustawienia obrazu dla wykrytej kamery. OV3660 daje obraz odwrócony w pionie
+// i przesycone kolory – poprawki jak w przykładzie CameraWebServer od Espressif.
+static CamSettings camDefaultsFor() {
+  CamSettings d = CAM_DEFAULTS;
+  if (camPid == OV3660_PID) { d.vf = 1; d.br = 1; d.sa = -2; }
+  return d;
 }
 
 // Ustawia jeden parametr, np. camSet("br", 1). Zwraca false dla nieznanej nazwy.
@@ -477,7 +503,7 @@ static bool camSet(const char *key, int v) {
   else if (!strcmp(key, "bpc")) cam.bpc = v ? 1 : 0;
   else if (!strcmp(key, "wpc")) cam.wpc = v ? 1 : 0;
   else if (!strcmp(key, "lenc")) cam.lenc = v ? 1 : 0;
-  else if (!strcmp(key, "reset")) { cam = CAM_DEFAULTS; camForceReinit = true; }
+  else if (!strcmp(key, "reset")) { cam = camDefaultsFor(); camForceReinit = true; }
   else return false;
   // inny bufor, taktowanie albo powrót do ustawień czujnika -> restart kamery w loop()
   if (camWantedInitFs() != camInitFs || cam.xclk != camInitXclk || camForceReinit) {
@@ -499,6 +525,8 @@ static void camLoad() {
   if (len > 0 && tmp.ver == CAM_SETTINGS_VERSION) {
     if (tmp.xclk != 10) tmp.xclk = 20;
     cam = tmp;
+  } else {
+    camFresh = true;                  // ustawienia domyślne dobierzemy po wykryciu kamery
   }
   prefs.end();
 }
@@ -949,6 +977,17 @@ static bool cameraStart() {
   }
 
   cameraOk = true;
+  sensor_t *sens = esp_camera_sensor_get();
+  camPid = sens ? sens->id.PID : 0;
+  if (camFresh) {
+    camFresh = false;
+    int8_t xclk = cam.xclk;
+    cam = camDefaultsFor();
+    cam.xclk = xclk;
+    camDirty = true;
+    camDirtyMs = millis();
+  }
+  Serial.printf("Kamera: %s\n", camName());
   camResetApplied();
   camApplyAll();
   Serial.printf("Kamera gotowa, bufor dla rozdzielczosci nr %d\n", camInitFs);
@@ -1146,15 +1185,15 @@ static const char *resetReasonText() {
 // Stan systemu: wersja, czas pracy, pamięć, miejsce na aktualizację
 static esp_err_t sysHandler(httpd_req_t *req) {
   const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
-  char json[400];
+  char json[440];
   snprintf(json, sizeof(json),
            "{\"ver\":\"%s\",\"up\":%lu,\"reset\":\"%s\",\"heap\":%u,\"heapMin\":%u,\"heapSize\":%u,"
-           "\"psram\":%u,\"psramSize\":%u,\"sketch\":%u,\"otaSize\":%u,\"ota\":%d,\"cpu\":%u}",
+           "\"psram\":%u,\"psramSize\":%u,\"sketch\":%u,\"otaSize\":%u,\"ota\":%d,\"cpu\":%u,\"cam\":\"%s\"}",
            FW_VERSION, (unsigned long)(millis() / 1000), resetReasonText(),
            (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), (unsigned)ESP.getHeapSize(),
            (unsigned)ESP.getFreePsram(), (unsigned)ESP.getPsramSize(),
            (unsigned)ESP.getSketchSize(), next ? (unsigned)next->size : 0, next ? 1 : 0,
-           (unsigned)ESP.getCpuFreqMHz());
+           (unsigned)ESP.getCpuFreqMHz(), camName());
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);

@@ -57,6 +57,37 @@ Uwagi:
 - Programator ESP32-CAM-MB zakłada się tylko do wgrywania programu. W robocie ESP32-CAM zasilasz z L298N.
 - Silniki przy ruszaniu powodują spadki napięcia. Kondensator 470–1000 µF na zasilaniu 5 V ESP32-CAM i kondensatory 100 nF na zaciskach silników bardzo pomagają.
 
+## Sterownik TB6612FNG zamiast L298N
+
+TB6612FNG działa z tym samym programem, bez zmian w kodzie. Silniki dostają pełne napięcie, bo nie ma spadku ok. 2 V jak w L298N, a sterownik prawie się nie grzeje. Oznaczenia pinów poniżej są takie, jak na płytce ESP32-CAM:
+
+```
+ TB6612FNG              ESP32-CAM / zasilanie
+ ─────────              ─────────────────────
+ AIN1  ──────────────── IO14   (lewa strona)
+ AIN2  ──────────────── IO15
+ BIN1  ──────────────── IO13   (prawa strona)
+ BIN2  ──────────────── IO12
+ PWMA, PWMB, STBY ───── 3V3 (na stałe – prędkością steruje PWM na AIN/BIN)
+ VCC   ──────────────── 3V3 (logika)
+ VM    ──────────────── akumulator + (4,5–13,5 V)
+ GND   ──────────────── GND (pin obok 5V) i minus akumulatora – wspólna masa
+ AO1/AO2 ── silnik lewy        BO1/BO2 ── silnik prawy
+
+ Przetwornica step-down 5 V (np. MP1584, Mini360): wejście z akumulatora, wyjście na pin 5V ESP32-CAM
+```
+
+- TB6612 **nie ma stabilizatora 5 V**, więc ESP32-CAM trzeba zasilić z osobnej przetwornicy. Osobne zasilanie często zmniejsza też paski na obrazie.
+- Prąd: 1,2 A ciągle (3,2 A chwilowo) na kanał. Przy 4 silnikach użyj dwóch TB6612, tak jak dwóch L298N niżej. Do Mecanum każdy moduł obsługuje 2 koła.
+- W menu ⚙ → Napęd zmniejsz **Minimalną moc startową** do ok. 40–60. Wartość 90 była dobrana pod spadek napięcia na L298N.
+- **Częstotliwość PWM:** zacznij od 1 kHz. Przy 20 kHz silniki nie piszczą, ale przy tym sposobie podłączenia mogą słabiej ruszać na małej mocy.
+
+**Uwagi do pinów płytki ESP32-CAM:**
+- **VCC** (po prawej) to wyjście 3,3 V albo 5 V, zależnie od zworki na płytce, a nie wejście zasilania. Zasilanie podawaj na pin **5V**.
+- **IO16** (po prawej) obsługuje PSRAM. Nie podłączaj do niego niczego.
+- **GND/R** (po prawej, na dole): na części klonów ten pin nie jest masą. Jako masy używaj **GND obok 5V**.
+- Płytki z kamerą **OV3660** program rozpoznaje sam. Przy pierwszym starcie odwraca obraz w pionie i zmniejsza przesycenie kolorów. Model kamery widać w ⚙ → System.
+
 ## Wersja 4×4: 4 silniki, dwa L298N
 
 Przy 4 nieskrętnych kołach robot skręca jak czołg: koła lewej strony kręcą się inaczej niż koła prawej strony. Kod już to robi, więc nic w nim nie zmieniasz. Zmienia się tylko okablowanie.

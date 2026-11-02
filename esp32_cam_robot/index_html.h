@@ -894,7 +894,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   function loadSys(){
     fetch('/sys', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(j){
       var rows = [
-        ['Wersja programu', j.ver], ['Czas pracy', upTime(j.up)], ['Ostatni restart', j.reset],
+        ['Wersja programu', j.ver], ['Kamera', j.cam || '–'], ['Czas pracy', upTime(j.up)], ['Ostatni restart', j.reset],
         ['Wolna pamięć RAM', kb(j.heap) + ' z ' + kb(j.heapSize)], ['Najmniej RAM od startu', kb(j.heapMin)],
         ['Wolna PSRAM', kb(j.psram) + ' z ' + kb(j.psramSize)], ['Rozmiar programu', kb(j.sketch)],
         ['Miejsce na program', j.ota ? kb(j.otaSize) + ', wolne ' + kb(j.otaSize - j.sketch) : 'brak aktualizacji przez Wi-Fi']
