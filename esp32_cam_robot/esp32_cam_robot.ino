@@ -7,6 +7,8 @@
  *  - failsafe: silniki stają, gdy przez ustawiony czas nie przyjdzie żadna komenda
  *  - opcjonalnie odbiornik ExpressLRS (CRSF) – aparatura ma pierwszeństwo,
  *    gdy jest połączona i uzbrojona; w pozostałych przypadkach steruje telefon
+ *  - serwa (np. kamera pan/tilt) i przyciski z przypisywanymi funkcjami;
+ *    opcjonalny moduł PCA9685 (I2C) daje 16 dodatkowych wyjść
  *  - napęd czołgowy (2 lub 4 silniki) albo Mecanum (4 silniki, 8 pinów);
  *    piny, napęd i kanały aparatury ustawia się na stronie (⚙ → Napęd / ELRS)
  *
@@ -18,6 +20,7 @@
 #include <Preferences.h>
 #include <ESPmDNS.h>
 #include <Update.h>
+#include <Wire.h>
 #include "esp_ota_ops.h"
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
@@ -92,6 +95,9 @@ struct HwSettings {
   uint8_t rcDz;       // martwa strefa drążków aparatury, %
   uint8_t rcMinSpeed; // moc z aparatury przy gazie na dole, %
   uint8_t driver;     // sterownik silników: 0 – L298N, 1 – TB6612FNG (tylko opisy i schemat na stronie)
+  int8_t  sda, scl;   // piny I2C modułu PCA9685 (-1 = brak modułu)
+  uint8_t pcaAddr;    // adres I2C PCA9685
+  uint16_t pcaFreq;   // częstotliwość PWM PCA9685, Hz – wspólna dla 16 kanałów (serwa: 50 Hz)
 };
 #define HW_V1_SIZE offsetof(HwSettings, pwmFreq)
 static const HwSettings HW_DEFAULTS = {
@@ -113,7 +119,8 @@ static const HwSettings HW_DEFAULTS = {
   8,     // martwa strefa gałek, %
   5,     // martwa strefa aparatury, %
   25,    // moc z aparatury przy gazie na dole, %
-  0      // L298N
+  0,     // L298N
+  -1, -1, 0x40, 50   // bez modułu PCA9685
 };
 static HwSettings hw = HW_DEFAULTS;   // edytowane z menu
 static HwSettings hwBoot;             // aktywne od startu (piny i tryb zmieniają się po restarcie)
@@ -133,7 +140,42 @@ struct WifiSettings {
 };
 
 // Kanały LEDC: 0/1 (timer 0) zajmuje kamera (XCLK); 8/9 omijamy na wszelki wypadek
+// ---------- Serwa i przyciski (menu "Serwa" / "Przyciski", zapisywane w pamięci ESP) ----------
+// Wyjście (silnik, dioda, serwo, przycisk) to pin ESP32 albo kanał PCA9685 zapisany jako PCA_BASE + kanał.
+#define PCA_BASE    100
+#define SERVO_COUNT 6
+#define ACT_COUNT   8
+enum { SC_NONE, SC_PAN, SC_TILT, SC_RC };                 // sterowanie serwem
+enum { ACT_NONE, ACT_LIGHT, ACT_OUTPUT, ACT_SERVO, ACT_CENTER, ACT_POWER, ACT_TURBO, ACT_TYPES };
+
+struct ServoCfg {
+  int8_t  out;       // -1 = brak
+  uint8_t minA, maxA, center;   // stopnie 0..180
+  uint8_t inv;       // odwrócony kierunek
+  uint8_t speed;     // prędkość ruchu w 10°/s (0 = natychmiast)
+  uint8_t ctrl;      // SC_*: przeciąganie po obrazie poziomo / pionowo albo kanał aparatury
+  uint8_t ch;        // kanał aparatury dla SC_RC
+  char    name[12];
+};
+struct ActCfg {
+  uint8_t type;      // ACT_*
+  uint8_t mode;      // 0 – przełącznik, 1 – działa tylko przytrzymany
+  int8_t  out;       // wyjście dla ACT_OUTPUT
+  uint8_t servo;     // serwo dla ACT_SERVO
+  uint8_t a, b;      // ACT_SERVO: pozycja po włączeniu / wyłączeniu (°); ACT_POWER: moc %
+  uint8_t ch;        // kanał aparatury, który też wyzwala akcję (0 = brak)
+  uint8_t show;      // przycisk na ekranie
+  char    label[8];  // napis na przycisku (UTF-8, np. emoji)
+};
+#define IO_SETTINGS_VERSION 1
+struct IoSettings {
+  int8_t   ver;
+  ServoCfg s[SERVO_COUNT];
+  ActCfg   a[ACT_COUNT];
+};
+
 static const uint8_t MOTOR_CH[8] = { 4, 5, 6, 7, 10, 11, 12, 13 };
+static const uint8_t SERVO_CH[2] = { 14, 15 };   // kanały LEDC dla serw na pinach ESP32 (50 Hz, osobny timer)
 #define CH_LIGHT 2
 
 static volatile int targetX = 0;            // -100..100 (skręt / obrót)
@@ -214,11 +256,11 @@ httpd_handle_t streamHttpd = NULL;
 
 // ---------- PWM (kompatybilne z pakietem esp32 2.x i 3.x) ----------
 
-static void pwmAttach(uint8_t pin, uint8_t ch, uint32_t freq) {
+static void pwmAttach(uint8_t pin, uint8_t ch, uint32_t freq, uint8_t res = PWM_RES) {
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcAttachChannel(pin, freq, PWM_RES, ch);
+  ledcAttachChannel(pin, freq, res, ch);
 #else
-  ledcSetup(ch, freq, PWM_RES);
+  ledcSetup(ch, freq, res);
   ledcAttachPin(pin, ch);
 #endif
 }
@@ -242,6 +284,10 @@ static bool isFreePin(int p) {
   return false;
 }
 
+static bool isPcaOut(int p) { return p >= PCA_BASE && p < PCA_BASE + 16; }
+static bool pcaConfigured(const HwSettings &h) { return isFreePin(h.sda) && isFreePin(h.scl) && h.sda != h.scl; }
+static bool isOutPin(const HwSettings &h, int p) { return isFreePin(p) || (isPcaOut(p) && pcaConfigured(h)); }
+
 static bool usedByMotors(const HwSettings &h, int p) {
   for (int i = 0; i < motorPinCount(h); i++) if (h.pin[i] == p) return true;
   return false;
@@ -252,8 +298,9 @@ static bool hwValid(const HwSettings &h) {
   if (h.ver != HW_SETTINGS_VERSION || h.mode < 0 || h.mode > 1) return false;
   int n = motorPinCount(h);
   for (int i = 0; i < n; i++) {
-    if (!isFreePin(h.pin[i])) return false;
+    if (!isOutPin(h, h.pin[i])) return false;
     for (int j = 0; j < i; j++) if (h.pin[i] == h.pin[j]) return false;
+    if (pcaConfigured(h) && (h.pin[i] == h.sda || h.pin[i] == h.scl)) return false;
   }
   for (int i = 0; i < RCF_COUNT; i++) if (h.ch[i] < 0 || h.ch[i] > 16) return false;
   return true;
@@ -272,6 +319,26 @@ static void hwClamp(HwSettings &h) {
   h.rcDz = constrain(h.rcDz, 0, 30);
   h.rcMinSpeed = constrain(h.rcMinSpeed, 0, 100);
   if (h.driver > 1) h.driver = 0;
+  if (h.pcaAddr < 0x40 || h.pcaAddr > 0x7F) h.pcaAddr = 0x40;
+  h.pcaFreq = constrain(h.pcaFreq, 24, 1500);
+}
+
+// ---------- Przydział pinów i kanałów PCA (każde wyjście może mieć tylko jedną funkcję) ----------
+static bool gpioUsed[40];
+static bool pcaUsed[16];
+
+static bool claimOut(int p) {
+  if (isFreePin(p)) {
+    if (gpioUsed[p]) return false;
+    gpioUsed[p] = true;
+    return true;
+  }
+  if (isPcaOut(p) && pcaConfigured(hwBoot)) {
+    if (pcaUsed[p - PCA_BASE]) return false;
+    pcaUsed[p - PCA_BASE] = true;
+    return true;
+  }
+  return false;
 }
 
 static void hwLoad() {
@@ -288,8 +355,13 @@ static void hwLoad() {
   }
   prefs.end();
   hwBoot = hw;
-  lightActive = isFreePin(hw.lightPin) && !usedByMotors(hw, hw.lightPin);
-  rcActive = isFreePin(hw.rcPin) && !usedByMotors(hw, hw.rcPin) && hw.rcPin != hw.lightPin;
+  // kolejność ważności: I2C modułu PCA, silniki, dioda, odbiornik (serwa i przyciski – w ioLoad)
+  memset(gpioUsed, 0, sizeof(gpioUsed));
+  memset(pcaUsed, 0, sizeof(pcaUsed));
+  if (pcaConfigured(hwBoot)) { claimOut(hwBoot.sda); claimOut(hwBoot.scl); }
+  for (int i = 0; i < motorPinCount(hwBoot); i++) claimOut(hwBoot.pin[i]);
+  lightActive = claimOut(hwBoot.lightPin);
+  rcActive = isFreePin(hwBoot.rcPin) && claimOut(hwBoot.rcPin);
 }
 
 static void hwSave() {
@@ -300,11 +372,60 @@ static void hwSave() {
 }
 
 // Czy jakiś aktywny pin to 1 lub 3 (UART0) – wtedy Serial Monitor musi zostać wyłączony
-static bool hwUsesUart0() {
-  for (int i = 0; i < motorPinCount(hwBoot); i++) if (hwBoot.pin[i] == 1 || hwBoot.pin[i] == 3) return true;
-  if (lightActive && (hwBoot.lightPin == 1 || hwBoot.lightPin == 3)) return true;
-  if (rcActive && (hwBoot.rcPin == 1 || hwBoot.rcPin == 3)) return true;
-  return false;
+static bool hwUsesUart0() { return gpioUsed[1] || gpioUsed[3]; }
+
+// ---------- Wyjścia: pin ESP32 (PWM LEDC) albo kanał modułu PCA9685 ----------
+static bool pcaOk = false;            // moduł odpowiedział na I2C
+static uint16_t pcaCache[16];
+
+static void pcaReg(uint8_t reg, uint8_t v) {
+  Wire.beginTransmission(hwBoot.pcaAddr);
+  Wire.write(reg);
+  Wire.write(v);
+  Wire.endTransmission();
+}
+
+// v: 0..4095 wypełnienia, 4096 = stale włączone. Zapis tylko przy zmianie (I2C jest wolne).
+static void pcaSet(int ch, uint16_t v) {
+  if (!pcaOk || ch < 0 || ch > 15 || pcaCache[ch] == v) return;
+  pcaCache[ch] = v;
+  uint16_t on = 0, off = v;
+  if (v >= 4096) { on = 0x1000; off = 0; }
+  else if (v == 0) off = 0x1000;
+  Wire.beginTransmission(hwBoot.pcaAddr);
+  Wire.write(0x06 + 4 * ch);          // LEDn_ON_L
+  Wire.write(on & 0xFF);
+  Wire.write(on >> 8);
+  Wire.write(off & 0xFF);
+  Wire.write(off >> 8);
+  Wire.endTransmission();
+}
+
+static bool pcaInit() {
+  if (!pcaConfigured(hwBoot)) return false;
+  Wire.begin(hwBoot.sda, hwBoot.scl, 400000);
+  Wire.beginTransmission(hwBoot.pcaAddr);
+  if (Wire.endTransmission() != 0) {
+    Serial.printf("PCA9685 nie odpowiada pod adresem 0x%02X\n", hwBoot.pcaAddr);
+    return false;
+  }
+  int pre = constrain((int)roundf(25000000.0f / (4096.0f * hwBoot.pcaFreq)) - 1, 3, 255);
+  pcaReg(0x00, 0x10);                 // MODE1: uśpienie – wymagane przy zmianie preskalera
+  pcaReg(0xFE, pre);                  // PRE_SCALE
+  pcaReg(0x00, 0x20);                 // MODE1: praca, auto-inkrementacja rejestrów
+  delay(1);
+  pcaReg(0x00, 0xA0);                 // restart PWM
+  pcaReg(0x01, 0x04);                 // MODE2: wyjścia push-pull
+  pcaOk = true;
+  for (int i = 0; i < 16; i++) { pcaCache[i] = 0xFFFF; pcaSet(i, 0); }
+  Serial.printf("PCA9685 gotowy, %d Hz\n", hwBoot.pcaFreq);
+  return true;
+}
+
+// Wypełnienie 0..255 na wyjście: pin ESP32 (z kanałem LEDC) albo kanał PCA
+static void outDuty(int p, uint8_t ledcCh, int duty) {
+  if (isPcaOut(p)) pcaSet(p - PCA_BASE, duty >= 255 ? 4096 : duty * 16);
+  else if (isFreePin(p)) pwmWrite(p, ledcCh, duty);
 }
 
 // ---------- Silniki ----------
@@ -312,9 +433,8 @@ static bool hwUsesUart0() {
 // silnik nr i (0..3), speed: -255..255
 static void setMotor(int i, int speed) {
   int a = hwBoot.pin[2 * i], b = hwBoot.pin[2 * i + 1];
-  uint8_t ca = MOTOR_CH[2 * i], cb = MOTOR_CH[2 * i + 1];
-  pwmWrite(a, ca, speed > 0 ? speed : 0);
-  pwmWrite(b, cb, speed < 0 ? -speed : 0);
+  outDuty(a, MOTOR_CH[2 * i], speed > 0 ? speed : 0);
+  outDuty(b, MOTOR_CH[2 * i + 1], speed < 0 ? -speed : 0);
 }
 
 // Przelicza wartość -100..100 na wypełnienie PWM z uwzględnieniem minimalnej mocy
@@ -366,26 +486,26 @@ static void drive(int x, int y, int s = 0, bool now = false) {
 
 static void motorsInit() {
   for (int i = 0; i < motorPinCount(hwBoot); i++) {
-    pinMode(hwBoot.pin[i], OUTPUT);
-    digitalWrite(hwBoot.pin[i], LOW);
-    pwmAttach(hwBoot.pin[i], MOTOR_CH[i], hwBoot.pwmFreq);
+    int p = hwBoot.pin[i];
+    if (!isFreePin(p)) continue;      // kanał PCA – bez konfiguracji pinu
+    pinMode(p, OUTPUT);
+    digitalWrite(p, LOW);
+    pwmAttach(p, MOTOR_CH[i], hwBoot.pwmFreq);
   }
   drive(0, 0, 0, true);
 
-  if (lightActive) {
-    pwmAttach(hwBoot.lightPin, CH_LIGHT, 5000);
-    pwmWrite(hwBoot.lightPin, CH_LIGHT, 0);
-  }
+  if (lightActive && isFreePin(hwBoot.lightPin)) pwmAttach(hwBoot.lightPin, CH_LIGHT, 5000);
+  if (lightActive) outDuty(hwBoot.lightPin, CH_LIGHT, 0);
 }
 
 // Zmiana z menu "Napęd" / "ELRS", np. hwSet("p3", 13). Piny i tryb działają po restarcie.
 static bool hwSet(const char *key, int v) {
   if      (!strcmp(key, "mode")) hw.mode = v ? MODE_MECANUM : MODE_TANK;
   else if (!strcmp(key, "mot"))  hw.motors = v == 4 ? 4 : 2;
-  else if (key[0] == 'p' && key[1] >= '0' && key[1] <= '7' && !key[2]) hw.pin[key[1] - '0'] = isFreePin(v) ? v : -1;
+  else if (key[0] == 'p' && key[1] >= '0' && key[1] <= '7' && !key[2]) hw.pin[key[1] - '0'] = (isFreePin(v) || isPcaOut(v)) ? v : -1;
   else if (!strncmp(key, "inv", 3) && key[3] >= '0' && key[3] <= '3' && !key[4]) hw.inv[key[3] - '0'] = v ? 1 : 0;
   else if (!strcmp(key, "md"))   hw.minDuty = constrain(v, 0, 200);
-  else if (!strcmp(key, "lp"))   hw.lightPin = isFreePin(v) ? v : -1;
+  else if (!strcmp(key, "lp"))   hw.lightPin = (isFreePin(v) || isPcaOut(v)) ? v : -1;
   else if (!strcmp(key, "rp"))   hw.rcPin = isFreePin(v) ? v : -1;
   else if (key[0] == 'c' && key[1] >= '0' && key[1] < '0' + RCF_COUNT && !key[2]) hw.ch[key[1] - '0'] = constrain(v, 0, 16);
   else if (!strcmp(key, "pf"))   hw.pwmFreq = v;
@@ -400,6 +520,10 @@ static bool hwSet(const char *key, int v) {
   else if (!strcmp(key, "rd"))   hw.rcDz = constrain(v, 0, 30);
   else if (!strcmp(key, "rm"))   hw.rcMinSpeed = constrain(v, 0, 100);
   else if (!strcmp(key, "drv"))  hw.driver = v ? 1 : 0;
+  else if (!strcmp(key, "sda"))  hw.sda = isFreePin(v) ? v : -1;
+  else if (!strcmp(key, "scl"))  hw.scl = isFreePin(v) ? v : -1;
+  else if (!strcmp(key, "pa"))   hw.pcaAddr = v;
+  else if (!strcmp(key, "pq"))   hw.pcaFreq = v;
   else if (!strcmp(key, "reset")) hw = HW_DEFAULTS;
   else if (!strcmp(key, "reboot")) { rebootRequested = true; return true; }
   else return false;
@@ -412,7 +536,8 @@ static bool hwSet(const char *key, int v) {
 // Czy zmiany w menu wymagają restartu (piny, tryb napędu, piny diody / odbiornika)
 static bool hwPending() {
   if (hw.mode != hwBoot.mode || hw.lightPin != hwBoot.lightPin || hw.rcPin != hwBoot.rcPin ||
-      hw.pwmFreq != hwBoot.pwmFreq) return true;
+      hw.pwmFreq != hwBoot.pwmFreq || hw.sda != hwBoot.sda || hw.scl != hwBoot.scl ||
+      hw.pcaAddr != hwBoot.pcaAddr || hw.pcaFreq != hwBoot.pcaFreq) return true;
   for (int i = 0; i < 8; i++) if (hw.pin[i] != hwBoot.pin[i]) return true;
   return false;
 }
@@ -682,6 +807,237 @@ static void rcUpdate() {
   }
 }
 
+// ---------- Serwa i przyciski ----------
+
+static String urlDecode(const char *s);   // zdefiniowane niżej, w części Wi-Fi
+
+static IoSettings io;                 // edytowane z menu
+static IoSettings ioBoot;             // aktywne od startu (wyjścia zmieniają się po restarcie)
+static volatile bool ioDirty = false;
+static volatile unsigned long ioDirtyMs = 0;
+static bool servoActive[SERVO_COUNT];
+static int8_t servoLedc[SERVO_COUNT];          // kanał LEDC serwa na pinie ESP32, -1 = PCA
+static volatile float servoTarget[SERVO_COUNT];
+static float servoPos[SERVO_COUNT];
+static int servoUsOut[SERVO_COUNT];
+static volatile bool actOn[ACT_COUNT];         // stan akcji: włączona / przytrzymana
+static bool actPhoneHeld[ACT_COUNT];           // przytrzymana z telefonu – puszcza ją failsafe
+static int8_t actRcLast[ACT_COUNT];            // ostatni stan przełącznika aparatury (-1 = nieznany)
+static bool actOutActive[ACT_COUNT];
+static int8_t actOutLevel[ACT_COUNT];
+
+static void ioDefaults(IoSettings &d) {
+  memset(&d, 0, sizeof(d));
+  d.ver = IO_SETTINGS_VERSION;
+  for (int i = 0; i < SERVO_COUNT; i++) {
+    ServoCfg &c = d.s[i];
+    c.out = -1; c.minA = 0; c.maxA = 180; c.center = 90;
+    c.ctrl = i == 0 ? SC_PAN : i == 1 ? SC_TILT : SC_NONE;
+    snprintf(c.name, sizeof(c.name), i == 0 ? "Pan" : i == 1 ? "Tilt" : "Serwo %d", i + 1);
+  }
+  for (int i = 0; i < ACT_COUNT; i++) { d.a[i].out = -1; d.a[i].a = 90; d.a[i].b = 0; }
+}
+
+static void ioLoad() {
+  ioDefaults(io);
+  prefs.begin("io", true);
+  IoSettings tmp;
+  if (prefs.getBytesLength("s") == sizeof(tmp) && prefs.getBytes("s", &tmp, sizeof(tmp)) == sizeof(tmp) &&
+      tmp.ver == IO_SETTINGS_VERSION) {
+    io = tmp;
+    for (int i = 0; i < SERVO_COUNT; i++) io.s[i].name[sizeof(io.s[i].name) - 1] = 0;
+    for (int i = 0; i < ACT_COUNT; i++) io.a[i].label[sizeof(io.a[i].label) - 1] = 0;
+  }
+  prefs.end();
+  ioBoot = io;
+  // przydział wyjść: serwa (na pinach ESP32 najwyżej dwa), potem wyjścia przycisków
+  int gpioServos = 0;
+  for (int i = 0; i < SERVO_COUNT; i++) {
+    int p = ioBoot.s[i].out;
+    servoLedc[i] = -1;
+    servoActive[i] = false;
+    if (isFreePin(p) && gpioServos >= 2) continue;
+    if (!claimOut(p)) continue;
+    servoActive[i] = true;
+    if (isFreePin(p)) servoLedc[i] = SERVO_CH[gpioServos++];
+  }
+  for (int i = 0; i < ACT_COUNT; i++) {
+    actOutActive[i] = ioBoot.a[i].type == ACT_OUTPUT && claimOut(ioBoot.a[i].out);
+    actOutLevel[i] = -1;
+    actRcLast[i] = -1;
+  }
+}
+
+static void ioSave() {
+  prefs.begin("io", false);
+  prefs.putBytes("s", &io, sizeof(io));
+  prefs.end();
+}
+
+static bool ioPending() {
+  for (int i = 0; i < SERVO_COUNT; i++) if (io.s[i].out != ioBoot.s[i].out) return true;
+  for (int i = 0; i < ACT_COUNT; i++)
+    if ((io.a[i].type == ACT_OUTPUT) != (ioBoot.a[i].type == ACT_OUTPUT) || io.a[i].out != ioBoot.a[i].out) return true;
+  return false;
+}
+
+static void ioChanged() { ioDirty = true; ioDirtyMs = millis(); }
+
+static float servoClamp(int i, float a) { return constrain(a, (float)io.s[i].minA, (float)io.s[i].maxA); }
+
+// Impuls 500..2500 us dla kąta 0..180°
+static void servoWrite(int i, int us) {
+  int p = ioBoot.s[i].out;
+  if (isPcaOut(p)) pcaSet(p - PCA_BASE, (uint32_t)us * hwBoot.pcaFreq * 4096UL / 1000000UL);
+  else if (servoLedc[i] >= 0) pwmWrite(p, servoLedc[i], (uint32_t)us * 65535UL / 20000UL);
+}
+
+static void servosInit() {
+  for (int i = 0; i < SERVO_COUNT; i++) {
+    servoPos[i] = io.s[i].center;
+    servoTarget[i] = io.s[i].center;
+    servoUsOut[i] = -1;
+    if (!servoActive[i]) continue;
+    if (servoLedc[i] >= 0) pwmAttach(ioBoot.s[i].out, servoLedc[i], 50, 16);
+  }
+}
+
+// Co 20 ms: serwa sterowane aparaturą idą za kanałem, wszystkie dochodzą do celu z ustawioną prędkością
+static void servoUpdate() {
+  static unsigned long last = 0;
+  unsigned long t = millis();
+  if (t - last < 20) return;
+  float dt = min((t - last) / 1000.0f, 0.2f);
+  last = t;
+  bool rc = rcConnected();
+  for (int i = 0; i < SERVO_COUNT; i++) {
+    if (!servoActive[i]) continue;
+    const ServoCfg &c = io.s[i];
+    if (c.ctrl == SC_RC && c.ch && rc) {
+      int v = rcAxis(c.ch);           // -100..100: od min przez środek do max
+      servoTarget[i] = v < 0 ? c.center + v * (c.center - c.minA) / 100.0f : c.center + v * (c.maxA - c.center) / 100.0f;
+    }
+    float tgt = servoClamp(i, servoTarget[i]);
+    if (c.speed == 0) servoPos[i] = tgt;
+    else servoPos[i] += constrain(tgt - servoPos[i], -c.speed * 10 * dt, c.speed * 10 * dt);
+    float a = c.inv ? 180 - servoPos[i] : servoPos[i];
+    int us = 500 + (int)(a * 2000 / 180);
+    if (us != servoUsOut[i]) {
+      servoUsOut[i] = us;
+      servoWrite(i, us);
+    }
+  }
+}
+
+static void centerCamera() {
+  for (int i = 0; i < SERVO_COUNT; i++)
+    if (io.s[i].ctrl == SC_PAN || io.s[i].ctrl == SC_TILT) servoTarget[i] = io.s[i].center;
+}
+
+// Naciśnięcie (down) / puszczenie przycisku albo przełącznika aparatury
+static void actPress(int i, bool down, bool fromPhone) {
+  if (i < 0 || i >= ACT_COUNT) return;
+  const ActCfg &a = io.a[i];
+  bool st = a.mode ? down : (down ? !actOn[i] : actOn[i]);   // przytrzymanie albo przełącznik
+  switch (a.type) {
+    case ACT_LIGHT:  if (down) lightOn = !lightOn; break;
+    case ACT_OUTPUT: actOn[i] = st; break;
+    case ACT_SERVO:
+      actOn[i] = st;
+      if (a.servo < SERVO_COUNT) servoTarget[a.servo] = st ? a.a : a.b;
+      break;
+    case ACT_CENTER: if (down) centerCamera(); break;
+    default: break;                   // moc i turbo obsługuje strona w telefonie
+  }
+  if (fromPhone) actPhoneHeld[i] = down && a.mode == 1;
+}
+
+// Kanały aparatury przypisane do przycisków: stan przełącznika = stan funkcji
+static void actionsRc() {
+  bool rc = rcConnected();
+  for (int i = 0; i < ACT_COUNT; i++) {
+    const ActCfg &a = io.a[i];
+    if (!a.ch || a.type == ACT_NONE || !rc) { actRcLast[i] = -1; continue; }
+    int sw = rcSwitch(a.ch) ? 1 : 0;
+    if (sw == actRcLast[i]) continue;
+    bool first = actRcLast[i] == -1;
+    actRcLast[i] = sw;
+    switch (a.type) {
+      case ACT_LIGHT:  if (!first) lightOn = sw; break;
+      case ACT_OUTPUT: actOn[i] = sw; break;
+      case ACT_SERVO:
+        actOn[i] = sw;
+        if (a.servo < SERVO_COUNT) servoTarget[a.servo] = sw ? a.a : a.b;
+        break;
+      case ACT_CENTER: if (sw && !first) centerCamera(); break;
+      default: break;
+    }
+  }
+}
+
+// Wyjścia przycisków (np. dodatkowe światła, buzzer, przekaźnik): włączone / wyłączone
+static void actionsOutputs() {
+  for (int i = 0; i < ACT_COUNT; i++) {
+    if (!actOutActive[i]) continue;
+    int8_t lv = actOn[i] ? 1 : 0;
+    if (lv == actOutLevel[i]) continue;
+    int p = ioBoot.a[i].out;
+    if (actOutLevel[i] == -1 && isFreePin(p)) pinMode(p, OUTPUT);
+    actOutLevel[i] = lv;
+    if (isPcaOut(p)) pcaSet(p - PCA_BASE, lv ? 4096 : 0);
+    else digitalWrite(p, lv ? HIGH : LOW);
+  }
+}
+
+static void releasePhoneActions() {
+  for (int i = 0; i < ACT_COUNT; i++) if (actPhoneHeld[i]) actPress(i, false, true);
+}
+
+static uint8_t actMask() {
+  uint8_t m = 0;
+  for (int i = 0; i < ACT_COUNT; i++) if (actOn[i]) m |= 1 << i;
+  return m;
+}
+
+// "S i klucz wartość" – konfiguracja serwa albo ruch ("p" – kąt, np. z przeciągania po obrazie)
+static void servoSet(int i, const char *key, const char *val) {
+  if (!strcmp(key, "reset")) { ioDefaults(io); centerCamera(); ioChanged(); return; }
+  if (i < 0 || i >= SERVO_COUNT) return;
+  ServoCfg &c = io.s[i];
+  int v = atoi(val);
+  if (!strcmp(key, "p")) { servoTarget[i] = servoClamp(i, v); return; }   // ruch nie jest zapisywany
+  if      (!strcmp(key, "o"))   c.out = (isFreePin(v) || isPcaOut(v)) ? v : -1;
+  else if (!strcmp(key, "mn"))  c.minA = constrain(v, 0, c.maxA);
+  else if (!strcmp(key, "mx"))  c.maxA = constrain(v, c.minA, 180);
+  else if (!strcmp(key, "c"))   { c.center = constrain(v, 0, 180); servoTarget[i] = c.center; }
+  else if (!strcmp(key, "inv")) c.inv = v ? 1 : 0;
+  else if (!strcmp(key, "sp"))  c.speed = constrain(v, 0, 30);
+  else if (!strcmp(key, "ct"))  c.ctrl = constrain(v, 0, 3);
+  else if (!strcmp(key, "ch"))  c.ch = constrain(v, 0, 16);
+  else if (!strcmp(key, "n"))   { String n = urlDecode(val); strlcpy(c.name, n.c_str(), sizeof(c.name)); }
+  else return;
+  c.center = constrain(c.center, c.minA, c.maxA);
+  ioChanged();
+}
+
+// "A i klucz wartość" – konfiguracja przycisku / akcji
+static void actSet(int i, const char *key, const char *val) {
+  if (i < 0 || i >= ACT_COUNT) return;
+  ActCfg &a = io.a[i];
+  int v = atoi(val);
+  if      (!strcmp(key, "t"))  { a.type = constrain(v, 0, ACT_TYPES - 1); actOn[i] = false; }
+  else if (!strcmp(key, "m"))  a.mode = v ? 1 : 0;
+  else if (!strcmp(key, "o"))  a.out = (isFreePin(v) || isPcaOut(v)) ? v : -1;
+  else if (!strcmp(key, "sv")) a.servo = constrain(v, 0, SERVO_COUNT - 1);
+  else if (!strcmp(key, "a"))  a.a = constrain(v, 0, 180);
+  else if (!strcmp(key, "b"))  a.b = constrain(v, 0, 180);
+  else if (!strcmp(key, "ch")) a.ch = constrain(v, 0, 16);
+  else if (!strcmp(key, "sh")) a.show = v ? 1 : 0;
+  else if (!strcmp(key, "l"))  { String l = urlDecode(val); strlcpy(a.label, l.c_str(), sizeof(a.label)); }
+  else return;
+  ioChanged();
+}
+
 // ---------- Komendy z przeglądarki ----------
 // "M x y [s]" – ruch: skręt/obrót, przód/tył, bok (Mecanum); -100..100
 // "L 0|1"  – światło
@@ -689,6 +1045,7 @@ static void rcUpdate() {
 // "H k v"  – napęd / piny / kanały aparatury, np. "H p0 14" (patrz hwSet)
 // "V"      – podgląd kanałów aparatury (odpowiedź "V ...")
 // "W k v"  – Wi-Fi (wartość zakodowana jak w URL), np. "W ss Moja%20siec", "W apply 1"
+// "S i k v" – serwo nr i (konfiguracja albo ruch "p"), "A i k v" – przycisk nr i, "B i 1|0" – naciśnięcie / puszczenie
 // "P"      – ping (podtrzymanie failsafe)
 
 // zdefiniowane niżej, w części Wi-Fi
@@ -696,6 +1053,7 @@ static void wifiSet(const char *key, const char *val);
 static esp_err_t wifiHandler(httpd_req_t *req);
 static esp_err_t scanHandler(httpd_req_t *req);
 static esp_err_t sysHandler(httpd_req_t *req);
+static esp_err_t ioHandler(httpd_req_t *req);
 static esp_err_t updateHandler(httpd_req_t *req);
 
 static void handleCommand(const char *cmd) {
@@ -723,6 +1081,20 @@ static void handleCommand(const char *cmd) {
       if (sscanf(cmd + 1, "%7s %d", key, &a) == 2) hwSet(key, a);
       break;
     }
+    case 'S':
+    case 'A': {
+      int idx;
+      char key[8], val[64];
+      val[0] = 0;
+      if (sscanf(cmd + 1, "%d %7s %63s", &idx, key, val) >= 2) {
+        if (cmd[0] == 'S') servoSet(idx, key, val);
+        else actSet(idx, key, val);
+      }
+      break;
+    }
+    case 'B':
+      if (sscanf(cmd + 1, "%d %d", &a, &b) == 2) actPress(a, b != 0, true);
+      break;
     case 'W': {
       char key[8], val[192];
       val[0] = 0;
@@ -759,19 +1131,19 @@ static esp_err_t settingsHandler(httpd_req_t *req) {
 
 // Konfiguracja napędu i aparatury jako JSON (menu "Napęd" / "ELRS")
 static esp_err_t hwHandler(httpd_req_t *req) {
-  char json[600];
+  char json[700];
   const HwSettings &h = hw;
   snprintf(json, sizeof(json),
            "{\"mode\":%d,\"mot\":%d,\"p\":[%d,%d,%d,%d,%d,%d,%d,%d],\"inv\":[%d,%d,%d,%d],"
            "\"md\":%d,\"lp\":%d,\"rp\":%d,\"c\":[%d,%d,%d,%d,%d,%d],"
            "\"pf\":%d,\"fo\":%d,\"rt\":%d,\"rv\":%u,\"tg\":%d,\"mp\":%d,\"ac\":%d,\"lt\":%d,"
-           "\"dz\":%d,\"rd\":%d,\"rm\":%d,\"drv\":%d,"
+           "\"dz\":%d,\"rd\":%d,\"rm\":%d,\"drv\":%d,\"sda\":%d,\"scl\":%d,\"pa\":%d,\"pq\":%d,\"pcaOk\":%d,"
            "\"bootMode\":%d,\"pending\":%d,\"lightOk\":%d,\"rcOk\":%d,\"serialOff\":%d}",
            h.mode, h.motors, h.pin[0], h.pin[1], h.pin[2], h.pin[3], h.pin[4], h.pin[5], h.pin[6], h.pin[7],
            h.inv[0], h.inv[1], h.inv[2], h.inv[3], h.minDuty, h.lightPin, h.rcPin,
            h.ch[0], h.ch[1], h.ch[2], h.ch[3], h.ch[4], h.ch[5],
            h.pwmFreq, h.failsafeMs, h.rcTimeout, (unsigned)h.rcRev, h.turnGain, h.maxPower, h.accel, h.lightPct,
-           h.stickDz, h.rcDz, h.rcMinSpeed, h.driver,
+           h.stickDz, h.rcDz, h.rcMinSpeed, h.driver, h.sda, h.scl, h.pcaAddr, h.pcaFreq, pcaOk ? 1 : 0,
            hwBoot.mode, hwPending() ? 1 : 0, lightActive ? 1 : 0, rcActive ? 1 : 0, hwUsesUart0() ? 1 : 0);
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -810,9 +1182,9 @@ static esp_err_t wsHandler(httpd_req_t *req) {
     for (int i = 0; i < 16 && olen < (int)sizeof(out) - 6; i++)
       olen += snprintf(out + olen, sizeof(out) - olen, " %d", rcHaveFrame ? (rcCh[i] - CRSF_MID) * 5 / 8 + 1500 : 0);
   } else {
-    // Stan: "R <aparatura> <światło> <fps> <KB na klatkę> <koła %: LP PP LT PT>"
-    olen = snprintf(out, sizeof(out), "R %d %d %d %d %d %d %d %d", rcState, lightOn ? 1 : 0, streamFps, streamKB,
-                    wheelOut[0], wheelOut[1], wheelOut[2], wheelOut[3]);
+    // Stan: "R <aparatura> <światło> <fps> <KB na klatkę> <koła %: LP PP LT PT> <włączone przyciski – bity>"
+    olen = snprintf(out, sizeof(out), "R %d %d %d %d %d %d %d %d %d", rcState, lightOn ? 1 : 0, streamFps, streamKB,
+                    wheelOut[0], wheelOut[1], wheelOut[2], wheelOut[3], actMask());
   }
   httpd_ws_frame_t reply;
   memset(&reply, 0, sizeof(reply));
@@ -913,6 +1285,8 @@ static void startServers() {
     httpd_register_uri_handler(webHttpd, &wifiUri);
     httpd_register_uri_handler(webHttpd, &scanUri);
     httpd_uri_t sysUri = { "/sys", HTTP_GET, sysHandler, NULL };
+    httpd_uri_t ioUri = { "/io", HTTP_GET, ioHandler, NULL };
+    httpd_register_uri_handler(webHttpd, &ioUri);
     httpd_uri_t updateUri = { "/update", HTTP_POST, updateHandler, NULL };
     httpd_register_uri_handler(webHttpd, &sysUri);
     httpd_register_uri_handler(webHttpd, &updateUri);
@@ -1169,6 +1543,33 @@ static esp_err_t scanHandler(httpd_req_t *req) {
   return httpd_resp_send(req, j.c_str(), j.length());
 }
 
+// ---------- Serwa i przyciski: JSON dla menu ----------
+
+static esp_err_t ioHandler(httpd_req_t *req) {
+  String j = "{\"s\":[";
+  for (int i = 0; i < SERVO_COUNT; i++) {
+    const ServoCfg &c = io.s[i];
+    if (i) j += ",";
+    j += "{\"n\":" + jsonStr(c.name) + ",\"o\":" + String(c.out) + ",\"mn\":" + String(c.minA) +
+         ",\"mx\":" + String(c.maxA) + ",\"c\":" + String(c.center) + ",\"inv\":" + String(c.inv) +
+         ",\"sp\":" + String(c.speed) + ",\"ct\":" + String(c.ctrl) + ",\"ch\":" + String(c.ch) +
+         ",\"pos\":" + String((int)roundf(servoTarget[i])) + ",\"ok\":" + String(servoActive[i] ? 1 : 0) + "}";
+  }
+  j += "],\"a\":[";
+  for (int i = 0; i < ACT_COUNT; i++) {
+    const ActCfg &a = io.a[i];
+    if (i) j += ",";
+    j += "{\"t\":" + String(a.type) + ",\"m\":" + String(a.mode) + ",\"o\":" + String(a.out) +
+         ",\"sv\":" + String(a.servo) + ",\"a\":" + String(a.a) + ",\"b\":" + String(a.b) +
+         ",\"ch\":" + String(a.ch) + ",\"sh\":" + String(a.show) + ",\"l\":" + jsonStr(a.label) +
+         ",\"ok\":" + String(a.type != ACT_OUTPUT || actOutActive[i] ? 1 : 0) + "}";
+  }
+  j += "],\"pending\":" + String(ioPending() ? 1 : 0) + "}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, j.c_str(), j.length());
+}
+
 // ---------- System: stan i aktualizacja przez Wi-Fi ----------
 
 static const char *resetReasonText() {
@@ -1256,6 +1657,7 @@ void setup() {
   Serial.println("\nESP32-CAM Robot");
 
   hwLoad();
+  ioLoad();                           // serwa i przyciski dostają piny, które zostały wolne
   Serial.printf("Naped: %s, piny silnikow:", hwBoot.mode == MODE_MECANUM ? "Mecanum" : "czolg");
   for (int i = 0; i < motorPinCount(hwBoot); i++) Serial.printf(" %d", hwBoot.pin[i]);
   Serial.printf("; dioda: %d%s; ELRS: %d%s\n", hwBoot.lightPin, lightActive ? "" : " (wylaczona)",
@@ -1266,7 +1668,9 @@ void setup() {
     Serial.end();
   }
 
+  pcaOk = pcaInit();
   motorsInit();
+  servosInit();
   rcInit();
 
   camMutex = xSemaphoreCreateMutex();
@@ -1305,11 +1709,21 @@ void loop() {
   }
   drive(x, y, sd, stopNow);
 
+  // przyciski i serwa
+  if (millis() - lastCmdMs > (unsigned long)hw.failsafeMs) releasePhoneActions();   // telefon zamilkł
+  actionsRc();
+  servoUpdate();
+  actionsOutputs();
+  if (ioDirty && (millis() - ioDirtyMs > 1000 || rebootRequested)) {
+    ioDirty = false;
+    ioSave();
+  }
+
   // światło (jasność z menu można zmieniać przy włączonej diodzie)
   static int lightDutyApplied = -1;
   int ld = lightOn ? hw.lightPct * 255 / 100 : 0;
   if (ld != lightDutyApplied) {
-    if (lightActive) pwmWrite(hwBoot.lightPin, CH_LIGHT, ld);
+    if (lightActive) outDuty(hwBoot.lightPin, CH_LIGHT, ld);
     lightDutyApplied = ld;
   }
 
@@ -1338,6 +1752,7 @@ void loop() {
   if (rebootRequested) {
     drive(0, 0, 0, true);
     if (hwDirty) hwSave();            // nie zgub niezapisanych zmian
+    if (ioDirty) ioSave();
     if (camDirty) camSave();
     delay(300);                       // czas na wysłanie odpowiedzi do przeglądarki
     ESP.restart();
