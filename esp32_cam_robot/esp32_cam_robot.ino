@@ -133,7 +133,18 @@ static volatile unsigned long camDirtyMs = 0;
 static Preferences prefs;
 
 static volatile uint32_t frameCount = 0;   // licznik klatek strumienia (do FPS)
+static volatile uint32_t frameBytes = 0;
 static volatile int streamFps = 0;
+static volatile int streamKB = 0;          // średni rozmiar klatki w KB
+
+// Kamera startuje z buforem 800x600 (jak w v1.0). Dla większych rozdzielczości
+// jest uruchamiana ponownie z większym buforem – w loop(), pod mutexem.
+#define FS_BASE_INIT 3                     // indeks FRAMESIZE_SVGA w FRAME_SIZES
+static int camInitFs = -1;
+static volatile bool camNeedReinit = false;
+static SemaphoreHandle_t camMutex = NULL;
+
+static int camWantedInitFs() { return hasPsram ? max((int)cam.fs, FS_BASE_INIT) : 0; }
 
 httpd_handle_t webHttpd = NULL;
 httpd_handle_t streamHttpd = NULL;
@@ -216,7 +227,8 @@ static void motorsInit() {
 static void camApplyAll() {
   if (!cameraOk) return;
   sensor_t *s = esp_camera_sensor_get();
-  int fs = hasPsram ? cam.fs : 0;     // bez PSRAM tylko najmniejsza rozdzielczość
+  // nigdy większa niż bufor z inicjalizacji; bez PSRAM tylko najmniejsza
+  int fs = hasPsram ? min((int)cam.fs, camInitFs) : 0;
   s->set_framesize(s, FRAME_SIZES[fs]);
   s->set_quality(s, cam.q);
   s->set_brightness(s, cam.br);
@@ -250,6 +262,7 @@ static bool camSet(const char *key, int v) {
   else if (!strcmp(key, "rot")) cam.rot = ((v / 90) & 3) * 90;
   else if (!strcmp(key, "reset")) cam = CAM_DEFAULTS;
   else return false;
+  if (camWantedInitFs() != camInitFs) camNeedReinit = true;   // inny bufor -> restart kamery w loop()
   camApplyAll();
   camDirty = true;                    // zapis do pamięci w loop(), z opóźnieniem
   camDirtyMs = millis();
@@ -479,9 +492,9 @@ static esp_err_t wsHandler(httpd_req_t *req) {
   if (frame.type != HTTPD_WS_TYPE_TEXT) return ESP_OK;
   handleCommand((const char *)buf);
 
-  // Odpowiedź ze stanem: "R <stan aparatury> <światło> <fps>"
-  char out[24];
-  int olen = snprintf(out, sizeof(out), "R %d %d %d", rcState, lightOn ? 1 : 0, streamFps);
+  // Odpowiedź ze stanem: "R <stan aparatury> <światło> <fps> <KB na klatkę>"
+  char out[32];
+  int olen = snprintf(out, sizeof(out), "R %d %d %d %d", rcState, lightOn ? 1 : 0, streamFps, streamKB);
   httpd_ws_frame_t reply;
   memset(&reply, 0, sizeof(reply));
   reply.type = HTTPD_WS_TYPE_TEXT;
@@ -504,8 +517,15 @@ static esp_err_t streamHandler(httpd_req_t *req) {
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
   while (true) {
+    xSemaphoreTake(camMutex, portMAX_DELAY);  // restart kamery czeka, aż klatka zostanie wysłana
+    if (!cameraOk) {
+      xSemaphoreGive(camMutex);
+      delay(100);
+      continue;
+    }
     camera_fb_t *fb = esp_camera_fb_get();
     if (!fb) {
+      xSemaphoreGive(camMutex);
       Serial.println("Blad pobrania klatki");
       res = ESP_FAIL;
       break;
@@ -516,9 +536,12 @@ static esp_err_t streamHandler(httpd_req_t *req) {
     if (res == ESP_OK) res = httpd_resp_send_chunk(req, partBuf, hlen);
     if (res == ESP_OK) res = httpd_resp_send_chunk(req, (const char *)fb->buf, fb->len);
 
+    size_t len = fb->len;
     esp_camera_fb_return(fb);
+    xSemaphoreGive(camMutex);
     if (res != ESP_OK) break;         // klient się rozłączył
     frameCount++;
+    frameBytes += len;
   }
   return res;
 }
@@ -570,7 +593,7 @@ static void startServers() {
 
 // ---------- Kamera ----------
 
-static bool cameraInit() {
+static bool cameraStart() {
   camera_config_t c;
   memset(&c, 0, sizeof(c));
   c.ledc_channel = LEDC_CHANNEL_0;
@@ -595,10 +618,9 @@ static bool cameraInit() {
   c.pixel_format = PIXFORMAT_JPEG;
   c.grab_mode = CAMERA_GRAB_LATEST;   // zawsze najświeższa klatka = mniejsze opóźnienie
 
-  hasPsram = psramFound();
+  camInitFs = camWantedInitFs();
   if (hasPsram) {
-    // bufory alokujemy dla największej rozdzielczości z menu, potem schodzimy do zapisanej
-    c.frame_size = FRAME_SIZES[FRAME_SIZE_COUNT - 1];
+    c.frame_size = FRAME_SIZES[camInitFs];
     c.jpeg_quality = 10;
     c.fb_count = 2;
     c.fb_location = CAMERA_FB_IN_PSRAM;
@@ -616,8 +638,8 @@ static bool cameraInit() {
   }
 
   cameraOk = true;
-  camLoad();
   camApplyAll();
+  Serial.printf("Kamera gotowa, bufor dla rozdzielczosci nr %d\n", camInitFs);
   return true;
 }
 
@@ -664,7 +686,10 @@ void setup() {
   motorsInit();
   rcInit();
 
-  if (!cameraInit()) {
+  camMutex = xSemaphoreCreateMutex();
+  hasPsram = psramFound();
+  camLoad();
+  if (!cameraStart()) {
     Serial.println("Kamera nie dziala - sterowanie bedzie dzialac bez obrazu");
   }
 
@@ -694,14 +719,28 @@ void loop() {
     lightApplied = l;
   }
 
-  // FPS strumienia
+  // Restart kamery z innym buforem (zmiana na / z 1024x768 lub HD)
+  if (camNeedReinit) {
+    camNeedReinit = false;
+    xSemaphoreTake(camMutex, portMAX_DELAY);
+    cameraOk = false;
+    esp_camera_deinit();
+    cameraStart();
+    xSemaphoreGive(camMutex);
+  }
+
+  // FPS i średni rozmiar klatki strumienia
   static unsigned long fpsMs = 0;
-  static uint32_t fpsFrames = 0;
+  static uint32_t fpsFrames = 0, fpsBytes = 0;
   if (millis() - fpsMs >= 1000) {
-    uint32_t f = frameCount;
+    uint32_t f = frameCount, b = frameBytes;
     streamFps = f - fpsFrames;
+    streamKB = streamFps ? (b - fpsBytes) / streamFps / 1024 : 0;
     fpsFrames = f;
+    fpsBytes = b;
     fpsMs = millis();
+    static int dbg = 0;
+    if (streamFps && ++dbg % 5 == 0) Serial.printf("Strumien: %d fps, %d KB/klatke\n", streamFps, streamKB);
   }
 
   // Zapis ustawień obrazu 3 s po ostatniej zmianie (oszczędza pamięć flash)

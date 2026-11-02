@@ -1,5 +1,11 @@
 Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu (dwie gałki na ekranie + podgląd z kamery) oraz opcjonalnie z aparatury ExpressLRS.
 
+## Co nowego w v1.1.1
+
+- poprawka płynności obrazu: kamera znów startuje z buforem 800×600, tak jak w v1.0. W v1.1.0 startowała z buforem HD, co mogło obniżać FPS. Przy wyborze 1024×768 lub HD kamera sama uruchamia się ponownie z większym buforem; obraz znika wtedy na ok. sekundę.
+- obok FPS strona pokazuje średni rozmiar klatki w KB, co pomaga ocenić, czy ogranicza kamera, czy Wi-Fi
+- Serial Monitor co 5 s wypisuje FPS i rozmiar klatki
+
 ## Co nowego w v1.1.0
 
 - **sterowanie na dwa kciuki:** lewa gałka to gaz, prawa to skręt; gałki dopasowują się do wysokości ekranu

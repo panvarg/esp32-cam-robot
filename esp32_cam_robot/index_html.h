@@ -192,7 +192,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       showRc(+p[1]);
       var l = p[2] === '1';
       if (l !== light){ light = l; lightEl.classList.toggle('on', light); }
-      if (p[3] !== undefined) stxt.textContent = 'połączono · ' + p[3] + ' fps';
+      if (p[3] !== undefined) stxt.textContent = 'połączono · ' + p[3] + ' fps' + (p[4] ? ' · ' + p[4] + ' KB' : '');
     };
     ws.onclose = function(){ showRc(0); dot.className = ''; stxt.textContent = 'rozłączono'; setTimeout(connect, 1000); };
     ws.onerror = function(){ try{ ws.close(); }catch(e){} };
