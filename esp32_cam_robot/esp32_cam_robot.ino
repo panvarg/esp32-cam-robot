@@ -98,6 +98,15 @@ static volatile bool rebootRequested = false;
 static bool lightActive = false;      // pin diody jest ustawiony i nie koliduje z silnikami
 static bool rcActive = false;         // jw. dla odbiornika
 
+// ---------- Wi-Fi (menu "Wi-Fi", zapisywane w pamięci ESP) ----------
+// Struktura musi być tutaj, przed pierwszą funkcją – Arduino IDE wstawia tam deklaracje funkcji.
+struct WifiSettings {
+  uint8_t mode;     // 0 – własna sieć robota (AP), 1 – sieć domowa (STA)
+  uint8_t apKeep;   // w trybie sieci domowej zostaw też własną sieć robota
+  uint8_t apCh;     // kanał własnej sieci 1..13
+  String apSsid, apPass, staSsid, staPass, host;
+};
+
 // Kanały LEDC: 0/1 (timer 0) zajmuje kamera (XCLK); 8/9 omijamy na wszelki wypadek
 static const uint8_t MOTOR_CH[8] = { 4, 5, 6, 7, 10, 11, 12, 13 };
 #define CH_LIGHT 2
@@ -290,7 +299,8 @@ static void drive(int x, int y, int s = 0) {
       wheelOut[i] = w[i];
       setMotor(i, toDuty(hw.inv[i] ? -w[i] : w[i]));
     }
-    wheelOut[2] = wheelOut[3] = 0;
+    wheelOut[2] = 0;
+    wheelOut[3] = 0;
   }
 }
 
@@ -839,12 +849,6 @@ static bool cameraStart() {
 
 // ---------- Wi-Fi ----------
 
-struct WifiSettings {
-  uint8_t mode;     // 0 – własna sieć robota (AP), 1 – sieć domowa (STA)
-  uint8_t apKeep;   // w trybie sieci domowej zostaw też własną sieć robota
-  uint8_t apCh;     // kanał własnej sieci 1..13
-  String apSsid, apPass, staSsid, staPass, host;
-};
 static WifiSettings wifiCfg, wifiNew;      // aktywne / edytowane w menu
 static volatile bool wifiApply = false;
 static volatile bool wifiScanReq = false;
