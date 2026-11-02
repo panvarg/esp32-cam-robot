@@ -224,25 +224,38 @@ static void motorsInit() {
 
 // ---------- Kamera: ustawienia ----------
 
+// Do czujnika wysyłamy tylko to, co różni się od stanu po jego starcie – przy
+// domyślnych ustawieniach kamera pracuje dokładnie tak jak w v1.0.
+static CamSettings camApplied;
+
+static void camResetApplied() {      // stan czujnika zaraz po esp_camera_init()
+  camApplied = CAM_DEFAULTS;
+  camApplied.fs = -1;                 // rozdzielczość i jakość ustawiamy zawsze
+  camApplied.q = -1;
+  camApplied.hm = 0;
+  camApplied.vf = 0;
+}
+
 static void camApplyAll() {
   if (!cameraOk) return;
   sensor_t *s = esp_camera_sensor_get();
+  CamSettings &a = camApplied;
   // nigdy większa niż bufor z inicjalizacji; bez PSRAM tylko najmniejsza
   int fs = hasPsram ? min((int)cam.fs, camInitFs) : 0;
-  s->set_framesize(s, FRAME_SIZES[fs]);
-  s->set_quality(s, cam.q);
-  s->set_brightness(s, cam.br);
-  s->set_contrast(s, cam.ct);
-  s->set_saturation(s, cam.sa);
-  s->set_whitebal(s, 1);
-  s->set_awb_gain(s, 1);
-  s->set_wb_mode(s, cam.wb);
-  s->set_exposure_ctrl(s, cam.ae);
-  s->set_ae_level(s, cam.al);
-  if (!cam.ae) s->set_aec_value(s, cam.ex);
-  s->set_special_effect(s, cam.fx);
-  s->set_hmirror(s, cam.hm);
-  s->set_vflip(s, cam.vf);
+  if (fs != a.fs)        s->set_framesize(s, FRAME_SIZES[fs]);
+  if (cam.q != a.q)      s->set_quality(s, cam.q);
+  if (cam.br != a.br)    s->set_brightness(s, cam.br);
+  if (cam.ct != a.ct)    s->set_contrast(s, cam.ct);
+  if (cam.sa != a.sa)    s->set_saturation(s, cam.sa);
+  if (cam.wb != a.wb)    s->set_wb_mode(s, cam.wb);
+  if (cam.ae != a.ae)    s->set_exposure_ctrl(s, cam.ae);
+  if (cam.al != a.al)    s->set_ae_level(s, cam.al);
+  if (!cam.ae && (cam.ex != a.ex || cam.ae != a.ae)) s->set_aec_value(s, cam.ex);
+  if (cam.fx != a.fx)    s->set_special_effect(s, cam.fx);
+  if (cam.hm != a.hm)    s->set_hmirror(s, cam.hm);
+  if (cam.vf != a.vf)    s->set_vflip(s, cam.vf);
+  a = cam;
+  a.fs = fs;
 }
 
 // Ustawia jeden parametr, np. camSet("br", 1). Zwraca false dla nieznanej nazwy.
@@ -638,6 +651,7 @@ static bool cameraStart() {
   }
 
   cameraOk = true;
+  camResetApplied();
   camApplyAll();
   Serial.printf("Kamera gotowa, bufor dla rozdzielczosci nr %d\n", camInitFs);
   return true;
