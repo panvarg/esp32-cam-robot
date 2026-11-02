@@ -7,6 +7,8 @@
  *  - failsafe: silniki stają, gdy przez FAILSAFE_MS nie przyjdzie żadna komenda
  *  - opcjonalnie odbiornik ExpressLRS (CRSF) – aparatura ma pierwszeństwo,
  *    gdy jest połączona i uzbrojona; w pozostałych przypadkach steruje telefon
+ *  - napęd czołgowy (2 lub 4 silniki) albo Mecanum (4 silniki, 8 pinów);
+ *    piny, napęd i kanały aparatury ustawia się na stronie (⚙ → Napęd / ELRS)
  *
  * Płytka w Arduino IDE: "AI Thinker ESP32-CAM", Partition Scheme: "Huge APP".
  * Wymagany pakiet esp32 by Espressif w wersji 2.x lub 3.x.
@@ -36,18 +38,11 @@ const char *AP_PASS = "robot1234";        // min. 8 znaków
 const char *STA_SSID = "TwojaSiec";
 const char *STA_PASS = "TwojeHaslo";
 
-// Piny L298N (zworki ENA i ENB ZAŁOŻONE – prędkość regulujemy PWM-em na INx)
-#define PIN_IN1 14   // silnik lewy  (OUT1/OUT2)
-#define PIN_IN2 15
-#define PIN_IN3 13   // silnik prawy (OUT3/OUT4)
-#define PIN_IN4 12
+// Napęd, piny L298N i odbiornik ELRS ustawiasz na stronie: ⚙ → Napęd / ELRS.
+// Konfiguracja jest zapisywana w pamięci ESP; domyślne wartości są w HW_DEFAULTS niżej.
+// Zworki ENA i ENB na L298N ZAŁOŻONE – prędkość regulujemy PWM-em na pinach INx.
 
-// Jeśli koło kręci się w złą stronę – zmień na true zamiast przekładać kable
-#define INVERT_LEFT  false
-#define INVERT_RIGHT false
-
-// Dioda flash na płytce
-#define PIN_LIGHT   4
+// Dioda flash
 #define LIGHT_DUTY  60   // jasność 0..255 (pełna moc mocno grzeje i oślepia)
 
 // Domyślne odbicie obrazu (później można je zmienić w menu ustawień na stronie)
@@ -56,36 +51,65 @@ const char *STA_PASS = "TwojeHaslo";
 
 #define PWM_FREQ     1000  // Hz – dla L298N 500..2000 Hz działa dobrze
 #define PWM_RES      8     // rozdzielczość 8 bit -> 0..255
-#define MIN_DUTY     90    // minimalne wypełnienie, przy którym silnik rusza
 #define FAILSAFE_MS  600   // stop, gdy brak komend przez tyle ms
 
-// ---------- Odbiornik ELRS / CRSF ----------
-// Podłączenie: TX odbiornika -> GPIO 2, VCC -> 5V, GND -> GND (RX odbiornika zostaw wolny)
-// Numery kanałów jak w aparaturze (1..16). 0 = nieużywany.
-#define RC_ENABLED      true
-#define RC_RX_PIN       2
-#define RC_CH_TURN      1    // prawy drążek lewo/prawo (aileron)
-#define RC_CH_DRIVE     2    // prawy drążek góra/dół (elevator)
-#define RC_CH_SPEED     3    // gaz = ograniczenie mocy (0 -> ustala RC_DEFAULT_SPEED)
-#define RC_CH_ARM       5    // AUX1: włączony = aparatura przejmuje sterowanie
-#define RC_CH_LIGHT     6    // AUX2: światło
+// Aparatura (przypisanie kanałów jest w menu ELRS)
 #define RC_MIN_SPEED    25   // moc przy gazie na dole, %
-#define RC_DEFAULT_SPEED 70  // moc, gdy RC_CH_SPEED = 0, %
+#define RC_DEFAULT_SPEED 70  // moc, gdy kanał mocy nie jest przypisany, %
 #define RC_TURN_GAIN    75   // czułość skrętu, %
 #define RC_DEADBAND     5    // martwa strefa drążków, %
 #define RC_TIMEOUT_MS   250  // brak ramek przez tyle ms = brak połączenia
 
-// Kanały LEDC – 0/1 (timer 0) zajmuje kamera (XCLK), więc zaczynamy od 2
-#define CH_LIGHT 2
-#define CH_IN1   4
-#define CH_IN2   5
-#define CH_IN3   6
-#define CH_IN4   7
-
 // ============================================================
 
-static volatile int targetX = 0;            // -100..100 (skręt)
+// ---------- Napęd i piny (menu "Napęd" / "ELRS", zapisywane w pamięci ESP) ----------
+// Wolne piny ESP32-CAM (AI-Thinker); reszta jest zajęta przez kamerę i PSRAM.
+static const int8_t FREE_PINS[] = { 1, 2, 3, 4, 12, 13, 14, 15 };
+
+#define HW_SETTINGS_VERSION 1
+#define MODE_TANK    0
+#define MODE_MECANUM 1
+// Funkcje kanałów aparatury (indeksy w HwSettings::ch)
+enum { RCF_TURN, RCF_DRIVE, RCF_STRAFE, RCF_SPEED, RCF_ARM, RCF_LIGHT, RCF_COUNT };
+
+struct HwSettings {
+  int8_t  ver;
+  int8_t  mode;      // MODE_TANK / MODE_MECANUM
+  int8_t  motors;    // 2 lub 4 (w trybie czołgu 4 silniki = dwa L298N z wejściami połączonymi równolegle)
+  int8_t  pin[8];    // czołg: lewy A, lewy B, prawy A, prawy B (4 piny)
+                     // mecanum: LP A/B, PP A/B, LT A/B, PT A/B (8 pinów)
+  int8_t  inv[4];    // odwrócenie: czołg [lewy, prawy]; mecanum [LP, PP, LT, PT]
+  uint8_t minDuty;   // minimalne wypełnienie PWM, przy którym silnik rusza
+  int8_t  lightPin;  // -1 = brak
+  int8_t  rcPin;     // -1 = brak odbiornika
+  int8_t  ch[RCF_COUNT];  // numer kanału 1..16, 0 = nieprzypisany
+};
+static const HwSettings HW_DEFAULTS = {
+  HW_SETTINGS_VERSION, MODE_TANK, 2,
+  { 14, 15, 13, 12, 2, 4, 1, 3 },
+  { 0, 0, 0, 0 },
+  90,
+  4,    // dioda flash na płytce
+  2,    // TX odbiornika ELRS
+  { 1, 2, 4, 3, 5, 6 }   // skręt CH1, jazda CH2, bok CH4, moc CH3 (gaz), uzbrojenie CH5, światło CH6
+};
+static HwSettings hw = HW_DEFAULTS;   // edytowane z menu
+static HwSettings hwBoot;             // aktywne od startu (piny i tryb zmieniają się po restarcie)
+static volatile bool hwDirty = false;
+static volatile unsigned long hwDirtyMs = 0;
+static volatile bool rebootRequested = false;
+static bool lightActive = false;      // pin diody jest ustawiony i nie koliduje z silnikami
+static bool rcActive = false;         // jw. dla odbiornika
+
+// Kanały LEDC: 0/1 (timer 0) zajmuje kamera (XCLK); 8/9 omijamy na wszelki wypadek
+static const uint8_t MOTOR_CH[8] = { 4, 5, 6, 7, 10, 11, 12, 13 };
+#define CH_LIGHT 2
+
+static volatile int targetX// ============================================================
+
+static volatile int targetX = 0;            // -100..100 (skręt / obrót)
 static volatile int targetY = 0;            // -100..100 (przód/tył)
+static volatile int targetS = 0;            // -100..100 (jazda bokiem, tylko Mecanum)
 static volatile unsigned long lastCmdMs = 0;
 static volatile bool lightOn = false;
 static bool lightApplied = false;
@@ -171,56 +195,147 @@ static void pwmWrite(uint8_t pin, uint8_t ch, uint32_t duty) {
 #endif
 }
 
-// ---------- Silniki ----------
+// ---------- Napęd: konfiguracja ----------
 
-// speed: -255..255
-static void setMotor(uint8_t pinA, uint8_t chA, uint8_t pinB, uint8_t chB, int speed) {
-  if (speed > 0) {
-    pwmWrite(pinA, chA, speed);
-    pwmWrite(pinB, chB, 0);
-  } else if (speed < 0) {
-    pwmWrite(pinA, chA, 0);
-    pwmWrite(pinB, chB, -speed);
-  } else {
-    pwmWrite(pinA, chA, 0);
-    pwmWrite(pinB, chB, 0);
-  }
+static int motorPinCount(const HwSettings &h) { return h.mode == MODE_MECANUM ? 8 : 4; }
+
+static bool isFreePin(int p) {
+  for (unsigned i = 0; i < sizeof(FREE_PINS); i++) if (FREE_PINS[i] == p) return true;
+  return false;
 }
 
-// Przelicza wartość -100..100 na wypełnienie PWM z uwzględnieniem MIN_DUTY
+static bool usedByMotors(const HwSettings &h, int p) {
+  for (int i = 0; i < motorPinCount(h); i++) if (h.pin[i] == p) return true;
+  return false;
+}
+
+// Piny silników: tylko wolne i każdy inny. Złe ustawienia -> domyślne (robot zawsze ruszy).
+static bool hwValid(const HwSettings &h) {
+  if (h.ver != HW_SETTINGS_VERSION || h.mode < 0 || h.mode > 1) return false;
+  int n = motorPinCount(h);
+  for (int i = 0; i < n; i++) {
+    if (!isFreePin(h.pin[i])) return false;
+    for (int j = 0; j < i; j++) if (h.pin[i] == h.pin[j]) return false;
+  }
+  for (int i = 0; i < RCF_COUNT; i++) if (h.ch[i] < 0 || h.ch[i] > 16) return false;
+  return true;
+}
+
+static void hwLoad() {
+  prefs.begin("hw", true);
+  HwSettings tmp;
+  if (prefs.getBytesLength("s") == sizeof(tmp) &&
+      prefs.getBytes("s", &tmp, sizeof(tmp)) == sizeof(tmp) && hwValid(tmp)) {
+    hw = tmp;
+  } else if (prefs.getBytesLength("s") > 0) {
+    Serial.println("Bledna konfiguracja napedu - uzywam domyslnej");
+  }
+  prefs.end();
+  hwBoot = hw;
+  lightActive = isFreePin(hw.lightPin) && !usedByMotors(hw, hw.lightPin);
+  rcActive = isFreePin(hw.rcPin) && !usedByMotors(hw, hw.rcPin) && hw.rcPin != hw.lightPin;
+}
+
+static void hwSave() {
+  prefs.begin("hw", false);
+  prefs.putBytes("s", &hw, sizeof(hw));
+  prefs.end();
+  Serial.println("Zapisano konfiguracje napedu");
+}
+
+// Czy jakiś aktywny pin to 1 lub 3 (UART0) – wtedy Serial Monitor musi zostać wyłączony
+static bool hwUsesUart0() {
+  for (int i = 0; i < motorPinCount(hwBoot); i++) if (hwBoot.pin[i] == 1 || hwBoot.pin[i] == 3) return true;
+  if (lightActive && (hwBoot.lightPin == 1 || hwBoot.lightPin == 3)) return true;
+  if (rcActive && (hwBoot.rcPin == 1 || hwBoot.rcPin == 3)) return true;
+  return false;
+}
+
+// ---------- Silniki ----------
+
+// silnik nr i (0..3), speed: -255..255
+static void setMotor(int i, int speed) {
+  int a = hwBoot.pin[2 * i], b = hwBoot.pin[2 * i + 1];
+  uint8_t ca = MOTOR_CH[2 * i], cb = MOTOR_CH[2 * i + 1];
+  pwmWrite(a, ca, speed > 0 ? speed : 0);
+  pwmWrite(b, cb, speed < 0 ? -speed : 0);
+}
+
+// Przelicza wartość -100..100 na wypełnienie PWM z uwzględnieniem minimalnej mocy
 static int toDuty(int v) {
   if (v == 0) return 0;
-  int mag = map(abs(v), 1, 100, MIN_DUTY, 255);
+  int mag = map(abs(v), 1, 100, hw.minDuty, 255);
   return v > 0 ? mag : -mag;
 }
 
-// Miksowanie "arcade drive": jeden analog -> dwa silniki (napęd czołgowy)
-static void drive(int x, int y) {
-  int left  = y + x;
-  int right = y - x;
+// Skaluje koła tak, żeby żadne nie przekroczyło 100% (zachowuje proporcje)
+static void normalize(int *w, int n) {
+  int m = 0;
+  for (int i = 0; i < n; i++) m = max(m, abs(w[i]));
+  if (m > 100) for (int i = 0; i < n; i++) w[i] = w[i] * 100 / m;
+}
 
-  int maxMag = max(abs(left), abs(right));
-  if (maxMag > 100) {               // zachowaj proporcje przy wychyleniu po skosie
-    left  = left  * 100 / maxMag;
-    right = right * 100 / maxMag;
+static volatile int wheelOut[4];   // ostatnia moc kół w % (do podglądu na stronie)
+
+// x – skręt/obrót, y – przód/tył, s – jazda bokiem (Mecanum); wszystko -100..100
+static void drive(int x, int y, int s = 0) {
+  if (hwBoot.mode == MODE_MECANUM) {
+    // kolejność: lewe przednie, prawe przednie, lewe tylne, prawe tylne
+    int w[4] = { y + s + x, y - s - x, y - s + x, y + s - x };
+    normalize(w, 4);
+    for (int i = 0; i < 4; i++) {
+      wheelOut[i] = w[i];
+      setMotor(i, toDuty(hw.inv[i] ? -w[i] : w[i]));
+    }
+  } else {
+    // "arcade drive": skręt czołgowy, lewa i prawa strona
+    int w[2] = { y + x, y - x };
+    normalize(w, 2);
+    for (int i = 0; i < 2; i++) {
+      wheelOut[i] = w[i];
+      setMotor(i, toDuty(hw.inv[i] ? -w[i] : w[i]));
+    }
+    wheelOut[2] = wheelOut[3] = 0;
   }
-
-  if (INVERT_LEFT)  left  = -left;
-  if (INVERT_RIGHT) right = -right;
-
-  setMotor(PIN_IN1, CH_IN1, PIN_IN2, CH_IN2, toDuty(left));
-  setMotor(PIN_IN3, CH_IN3, PIN_IN4, CH_IN4, toDuty(right));
 }
 
 static void motorsInit() {
-  pwmAttach(PIN_IN1, CH_IN1, PWM_FREQ);
-  pwmAttach(PIN_IN2, CH_IN2, PWM_FREQ);
-  pwmAttach(PIN_IN3, CH_IN3, PWM_FREQ);
-  pwmAttach(PIN_IN4, CH_IN4, PWM_FREQ);
+  for (int i = 0; i < motorPinCount(hwBoot); i++) {
+    pinMode(hwBoot.pin[i], OUTPUT);
+    digitalWrite(hwBoot.pin[i], LOW);
+    pwmAttach(hwBoot.pin[i], MOTOR_CH[i], PWM_FREQ);
+  }
   drive(0, 0);
 
-  pwmAttach(PIN_LIGHT, CH_LIGHT, 5000);
-  pwmWrite(PIN_LIGHT, CH_LIGHT, 0);
+  if (lightActive) {
+    pwmAttach(hwBoot.lightPin, CH_LIGHT, 5000);
+    pwmWrite(hwBoot.lightPin, CH_LIGHT, 0);
+  }
+}
+
+// Zmiana z menu "Napęd" / "ELRS", np. hwSet("p3", 13). Piny i tryb działają po restarcie.
+static bool hwSet(const char *key, int v) {
+  if      (!strcmp(key, "mode")) hw.mode = v ? MODE_MECANUM : MODE_TANK;
+  else if (!strcmp(key, "mot"))  hw.motors = v == 4 ? 4 : 2;
+  else if (key[0] == 'p' && key[1] >= '0' && key[1] <= '7' && !key[2]) hw.pin[key[1] - '0'] = isFreePin(v) ? v : -1;
+  else if (!strncmp(key, "inv", 3) && key[3] >= '0' && key[3] <= '3' && !key[4]) hw.inv[key[3] - '0'] = v ? 1 : 0;
+  else if (!strcmp(key, "md"))   hw.minDuty = constrain(v, 0, 200);
+  else if (!strcmp(key, "lp"))   hw.lightPin = isFreePin(v) ? v : -1;
+  else if (!strcmp(key, "rp"))   hw.rcPin = isFreePin(v) ? v : -1;
+  else if (key[0] == 'c' && key[1] >= '0' && key[1] < '0' + RCF_COUNT && !key[2]) hw.ch[key[1] - '0'] = constrain(v, 0, 16);
+  else if (!strcmp(key, "reset")) hw = HW_DEFAULTS;
+  else if (!strcmp(key, "reboot")) { rebootRequested = true; return true; }
+  else return false;
+  hwDirty = true;
+  hwDirtyMs = millis();
+  return true;
+}
+
+// Czy zmiany w menu wymagają restartu (piny, tryb napędu, piny diody / odbiornika)
+static bool hwPending() {
+  if (hw.mode != hwBoot.mode || hw.lightPin != hwBoot.lightPin || hw.rcPin != hwBoot.rcPin) return true;
+  for (int i = 0; i < 8; i++) if (hw.pin[i] != hwBoot.pin[i]) return true;
+  return false;
 }
 
 // ---------- Kamera: ustawienia ----------
@@ -316,7 +431,7 @@ static unsigned long rcLastFrameMs = 0;
 static uint8_t rcLinkQuality = 100;
 static bool rcArmLatched = false;
 static int rcLastLightSw = -1;
-static int rcX = 0, rcY = 0;
+static int rcX = 0, rcY = 0, rcS = 0;
 static uint8_t rcBuf[64];
 static uint8_t rcLen = 0;
 
@@ -330,7 +445,7 @@ static uint8_t crc8(const uint8_t *d, uint8_t n) {
 }
 
 static void rcInit() {
-  if (!RC_ENABLED) return;
+  if (!rcActive) return;
   // Sterownik UART z ESP-IDF zamiast Serial2 – HardwareSerial przy braku pinu TX
   // podpiąłby domyślny GPIO 17, który w ESP32-CAM obsługuje PSRAM.
   uart_config_t cfg = {};
@@ -341,7 +456,7 @@ static void rcInit() {
   cfg.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
   cfg.source_clk = UART_SCLK_APB;
   uart_param_config(RC_UART, &cfg);
-  uart_set_pin(RC_UART, UART_PIN_NO_CHANGE, RC_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+  uart_set_pin(RC_UART, UART_PIN_NO_CHANGE, hwBoot.rcPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
   uart_driver_install(RC_UART, 1024, 0, 0, NULL, 0);
 }
 
@@ -371,7 +486,7 @@ static void rcFrame(const uint8_t *f) {   // f: [adres][dlugosc][typ][dane...][c
 }
 
 static void rcPoll() {
-  if (!RC_ENABLED) return;
+  if (!rcActive) return;
   uint8_t tmp[64];
   int n;
   while ((n = uart_read_bytes(RC_UART, tmp, sizeof(tmp), 0)) > 0) {
@@ -398,61 +513,75 @@ static int rcAxis(int ch) {               // -100..100 %
 
 static bool rcSwitch(int ch) { return ch != 0 && rcRaw(ch) > 1300; }   // > ~1700 us
 
+static bool rcConnected() {
+  return rcActive && rcHaveFrame && rcLinkQuality > 0 && millis() - rcLastFrameMs < RC_TIMEOUT_MS;
+}
+
 static void rcUpdate() {
-  bool connected = RC_ENABLED && rcHaveFrame && rcLinkQuality > 0 &&
-                   millis() - rcLastFrameMs < RC_TIMEOUT_MS;
-  if (!connected) {
+  if (!rcConnected()) {
     rcState = 0;
     rcArmLatched = false;
     rcLastLightSw = -1;
     return;
   }
 
-  int turn = rcAxis(RC_CH_TURN);
-  int fwd  = rcAxis(RC_CH_DRIVE);
+  int turn = rcAxis(hw.ch[RCF_TURN]);
+  int fwd  = rcAxis(hw.ch[RCF_DRIVE]);
+  int side = hwBoot.mode == MODE_MECANUM ? rcAxis(hw.ch[RCF_STRAFE]) : 0;
   int speed = RC_DEFAULT_SPEED;
-  if (RC_CH_SPEED) {
-    int pct = constrain((rcRaw(RC_CH_SPEED) - 172) * 100 / 1639, 0, 100);
+  if (hw.ch[RCF_SPEED]) {
+    int pct = constrain((rcRaw(hw.ch[RCF_SPEED]) - 172) * 100 / 1639, 0, 100);
     speed = RC_MIN_SPEED + pct * (100 - RC_MIN_SPEED) / 100;
   }
 
   // Uzbrojenie tylko przy drążku w środku – robot nie wystrzeli po przełączeniu AUX
-  if (!rcSwitch(RC_CH_ARM)) rcArmLatched = false;
-  else if (!rcArmLatched && abs(turn) < 10 && abs(fwd) < 10) rcArmLatched = true;
+  if (!rcSwitch(hw.ch[RCF_ARM])) rcArmLatched = false;
+  else if (!rcArmLatched && abs(turn) < 10 && abs(fwd) < 10 && abs(side) < 10) rcArmLatched = true;
 
   rcX = turn * speed / 100 * RC_TURN_GAIN / 100;
   rcY = fwd * speed / 100;
+  rcS = side * speed / 100;
   rcState = rcArmLatched ? 2 : 1;
 
   // Światło: przełącznik działa przy każdej zmianie, telefon też może je przełączać
-  if (RC_CH_LIGHT) {
-    int sw = rcSwitch(RC_CH_LIGHT);
+  if (hw.ch[RCF_LIGHT]) {
+    int sw = rcSwitch(hw.ch[RCF_LIGHT]);
     if (sw != rcLastLightSw) lightOn = sw;
     rcLastLightSw = sw;
   }
 }
 
 // ---------- Komendy z przeglądarki ----------
-// "M x y"  – ruch, x i y w zakresie -100..100
+// "M x y [s]" – ruch: skręt/obrót, przód/tył, bok (Mecanum); -100..100
 // "L 0|1"  – światło
 // "C k v"  – ustawienie obrazu, np. "C br 1" (nazwy w struct CamSettings)
+// "H k v"  – napęd / piny / kanały aparatury, np. "H p0 14" (patrz hwSet)
+// "V"      – podgląd kanałów aparatury (odpowiedź "V ...")
 // "P"      – ping (podtrzymanie failsafe)
 
 static void handleCommand(const char *cmd) {
-  int a = 0, b = 0;
+  int a = 0, b = 0, c = 0;
   switch (cmd[0]) {
-    case 'M':
-      if (sscanf(cmd + 1, "%d %d", &a, &b) == 2) {
+    case 'M': {
+      int n = sscanf(cmd + 1, "%d %d %d", &a, &b, &c);
+      if (n >= 2) {
         targetX = constrain(a, -100, 100);
         targetY = constrain(b, -100, 100);
+        targetS = n == 3 ? constrain(c, -100, 100) : 0;
       }
       break;
+    }
     case 'L':
       if (sscanf(cmd + 1, "%d", &a) == 1) lightOn = (a != 0);
       break;
     case 'C': {
       char key[8];
       if (sscanf(cmd + 1, "%7s %d", key, &a) == 2) camSet(key, a);
+      break;
+    }
+    case 'H': {
+      char key[8];
+      if (sscanf(cmd + 1, "%7s %d", key, &a) == 2) hwSet(key, a);
       break;
     }
     default:
@@ -482,6 +611,23 @@ static esp_err_t settingsHandler(httpd_req_t *req) {
   return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
+// Konfiguracja napędu i aparatury jako JSON (menu "Napęd" / "ELRS")
+static esp_err_t hwHandler(httpd_req_t *req) {
+  char json[400];
+  const HwSettings &h = hw;
+  snprintf(json, sizeof(json),
+           "{\"mode\":%d,\"mot\":%d,\"p\":[%d,%d,%d,%d,%d,%d,%d,%d],\"inv\":[%d,%d,%d,%d],"
+           "\"md\":%d,\"lp\":%d,\"rp\":%d,\"c\":[%d,%d,%d,%d,%d,%d],"
+           "\"bootMode\":%d,\"pending\":%d,\"lightOk\":%d,\"rcOk\":%d,\"serialOff\":%d}",
+           h.mode, h.motors, h.pin[0], h.pin[1], h.pin[2], h.pin[3], h.pin[4], h.pin[5], h.pin[6], h.pin[7],
+           h.inv[0], h.inv[1], h.inv[2], h.inv[3], h.minDuty, h.lightPin, h.rcPin,
+           h.ch[0], h.ch[1], h.ch[2], h.ch[3], h.ch[4], h.ch[5],
+           hwBoot.mode, hwPending() ? 1 : 0, lightActive ? 1 : 0, rcActive ? 1 : 0, hwUsesUart0() ? 1 : 0);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+}
+
 static esp_err_t wsHandler(httpd_req_t *req) {
   if (req->method == HTTP_GET) {      // handshake
     Serial.println("WebSocket: polaczono");
@@ -506,9 +652,18 @@ static esp_err_t wsHandler(httpd_req_t *req) {
   if (frame.type != HTTPD_WS_TYPE_TEXT) return ESP_OK;
   handleCommand((const char *)buf);
 
-  // Odpowiedź ze stanem: "R <stan aparatury> <światło> <fps> <KB na klatkę>"
-  char out[32];
-  int olen = snprintf(out, sizeof(out), "R %d %d %d %d", rcState, lightOn ? 1 : 0, streamFps, streamKB);
+  char out[160];
+  int olen;
+  if (buf[0] == 'V') {
+    // Podgląd aparatury: "V <aktywny> <połączona> <LQ> <kanał1 us> ... <kanał16 us>"
+    olen = snprintf(out, sizeof(out), "V %d %d %d", rcActive ? 1 : 0, rcConnected() ? 1 : 0, rcLinkQuality);
+    for (int i = 0; i < 16 && olen < (int)sizeof(out) - 6; i++)
+      olen += snprintf(out + olen, sizeof(out) - olen, " %d", rcHaveFrame ? (rcCh[i] - CRSF_MID) * 5 / 8 + 1500 : 0);
+  } else {
+    // Stan: "R <aparatura> <światło> <fps> <KB na klatkę> <koła %: LP PP LT PT>"
+    olen = snprintf(out, sizeof(out), "R %d %d %d %d %d %d %d %d", rcState, lightOn ? 1 : 0, streamFps, streamKB,
+                    wheelOut[0], wheelOut[1], wheelOut[2], wheelOut[3]);
+  }
   httpd_ws_frame_t reply;
   memset(&reply, 0, sizeof(reply));
   reply.type = HTTPD_WS_TYPE_TEXT;
@@ -584,6 +739,12 @@ static void startServers() {
   settingsUri.method = HTTP_GET;
   settingsUri.handler = settingsHandler;
 
+  httpd_uri_t hwUri;
+  memset(&hwUri, 0, sizeof(hwUri));
+  hwUri.uri = "/hw";
+  hwUri.method = HTTP_GET;
+  hwUri.handler = hwHandler;
+
   httpd_uri_t wsUri;
   memset(&wsUri, 0, sizeof(wsUri));
   wsUri.uri = "/ws";
@@ -594,6 +755,7 @@ static void startServers() {
   if (httpd_start(&webHttpd, &config) == ESP_OK) {
     httpd_register_uri_handler(webHttpd, &indexUri);
     httpd_register_uri_handler(webHttpd, &settingsUri);
+    httpd_register_uri_handler(webHttpd, &hwUri);
     httpd_register_uri_handler(webHttpd, &wsUri);
   }
 
@@ -704,6 +866,17 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\nESP32-CAM Robot");
 
+  hwLoad();
+  Serial.printf("Naped: %s, piny silnikow:", hwBoot.mode == MODE_MECANUM ? "Mecanum" : "czolg");
+  for (int i = 0; i < motorPinCount(hwBoot); i++) Serial.printf(" %d", hwBoot.pin[i]);
+  Serial.printf("; dioda: %d%s; ELRS: %d%s\n", hwBoot.lightPin, lightActive ? "" : " (wylaczona)",
+                hwBoot.rcPin, rcActive ? "" : " (wylaczony)");
+  if (hwUsesUart0()) {
+    Serial.println("Piny 1/3 sa uzyte przez naped/diode/ELRS - Serial Monitor zostaje wylaczony");
+    Serial.flush();
+    Serial.end();
+  }
+
   motorsInit();
   rcInit();
 
@@ -722,22 +895,35 @@ void loop() {
   rcPoll();
   rcUpdate();
 
-  int x = 0, y = 0;
+  int x = 0, y = 0, sd = 0;
   if (rcState == 2) {
     // aparatura połączona i uzbrojona – ma pierwszeństwo
     x = rcX;
     y = rcY;
+    sd = rcS;
   } else if (millis() - lastCmdMs <= FAILSAFE_MS) {
     // telefon; bez świeżych komend (failsafe) robot stoi
     x = targetX;
     y = targetY;
+    sd = targetS;
   }
-  drive(x, y);
+  drive(x, y, sd);
 
   bool l = lightOn;
   if (l != lightApplied) {
-    pwmWrite(PIN_LIGHT, CH_LIGHT, l ? LIGHT_DUTY : 0);
+    if (lightActive) pwmWrite(hwBoot.lightPin, CH_LIGHT, l ? LIGHT_DUTY : 0);
     lightApplied = l;
+  }
+
+  // Konfiguracja napędu: zapis 1 s po ostatniej zmianie; restart na żądanie z menu
+  if (hwDirty && (millis() - hwDirtyMs > 1000 || rebootRequested)) {
+    hwDirty = false;
+    hwSave();
+  }
+  if (rebootRequested) {
+    drive(0, 0);
+    delay(300);                       // czas na wysłanie odpowiedzi do przeglądarki
+    ESP.restart();
   }
 
   // Restart kamery z innym buforem (zmiana na / z 1024x768 lub HD)
