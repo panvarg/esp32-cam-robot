@@ -1,4 +1,11 @@
-Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu (analog na ekranie + podgląd z kamery) oraz opcjonalnie z aparatury ExpressLRS.
+Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu (dwie gałki na ekranie + podgląd z kamery) oraz opcjonalnie z aparatury ExpressLRS.
+
+## Co nowego w v1.1.0
+
+- **sterowanie na dwa kciuki:** lewa gałka to gaz, prawa to skręt; gałki dopasowują się do wysokości ekranu
+- **menu ustawień obrazu (⚙):** rozdzielczość do 1280×720, kompresja JPEG, obrót 0/90/180/270°, odbicia, jasność, kontrast, nasycenie, balans bieli, ekspozycja, efekty; zapisywane w pamięci robota
+- **licznik FPS** obok statusu połączenia
+- trzy przyciski jakości zastąpił szybki wybór w menu (Płynnie / Balans / Jakość)
 
 ## Co potrafi
 
