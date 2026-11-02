@@ -1130,13 +1130,13 @@ static esp_err_t scanHandler(httpd_req_t *req) {
 
 static const char *resetReasonText() {
   switch (esp_reset_reason()) {
-    case ESP_RST_POWERON:  return "wlaczenie zasilania";
+    case ESP_RST_POWERON:  return "włączenie zasilania";
     case ESP_RST_SW:       return "restart z programu";
-    case ESP_RST_PANIC:    return "blad programu";
+    case ESP_RST_PANIC:    return "błąd programu";
     case ESP_RST_INT_WDT:
     case ESP_RST_TASK_WDT:
-    case ESP_RST_WDT:      return "watchdog (zawieszenie)";
-    case ESP_RST_BROWNOUT: return "spadek napiecia";
+    case ESP_RST_WDT:      return "zawieszenie (watchdog)";
+    case ESP_RST_BROWNOUT: return "spadek napięcia";
     case ESP_RST_EXT:      return "przycisk RST";
     case ESP_RST_DEEPSLEEP: return "wybudzenie";
     default:               return "inna";
@@ -1173,23 +1173,23 @@ static esp_err_t otaFail(httpd_req_t *req, const char *msg) {
 }
 
 // Aktualizacja przez Wi-Fi: POST /update, treść = plik *-app.bin z wydania
-static esp_err_t updateHandler(httpd_req_t *req) {
+static esp_err_t updateHandler(httpd_req_t *req) {   // komunikaty błędów trafiają na stronę
   size_t remaining = req->content_len;
   if (!esp_ota_get_next_update_partition(NULL))
-    return otaFail(req, "Ten uklad pamieci nie obsluguje aktualizacji przez Wi-Fi. Wgraj raz kablem plik full.bin z wersji 1.3.0 lub nowszej.");
+    return otaFail(req, "Ten układ pamięci nie obsługuje aktualizacji przez Wi-Fi. Wgraj raz kablem plik full.bin z wersji 1.3.0 lub nowszej.");
   if (remaining == 0) return otaFail(req, "Pusty plik.");
   otaActive = true;                    // loop() zatrzymuje silniki
   camPause = true;                     // strumień obrazu czeka – cała przepustowość dla pliku
-  if (!Update.begin(remaining)) return otaFail(req, "Plik jest za duzy na miejsce na aktualizacje.");
+  if (!Update.begin(remaining)) return otaFail(req, "Plik jest za duży.");
 
   static uint8_t buf[2048];            // static – stos zadania serwera jest mały
   bool first = true;
   while (remaining > 0) {
     int r = httpd_req_recv(req, (char *)buf, min(remaining, sizeof(buf)));
     if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
-    if (r <= 0) return otaFail(req, "Przerwane polaczenie.");
+    if (r <= 0) return otaFail(req, "Przerwane połączenie.");
     if (first && buf[0] != 0xE9)
-      return otaFail(req, "To nie jest plik programu. Uzyj pliku *-app.bin (nie full.bin).");
+      return otaFail(req, "To nie jest plik programu. Użyj pliku *-app.bin (nie full.bin).");
     first = false;
     if (Update.write(buf, r) != (size_t)r) return otaFail(req, Update.errorString());
     remaining -= r;

@@ -91,6 +91,14 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   .net{display:flex;justify-content:space-between;gap:8px;text-align:left;height:34px;padding:0 10px;border-radius:8px;
     border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:#fff;font-size:13px;align-items:center}
   .net span{color:#8a949c;font-size:11px;white-space:nowrap}
+  .chv{grid-template-columns:44px 1fr 44px 20px}
+  .chv input{width:16px;height:16px;accent-color:#3b8fe0;margin:0}
+  .chv .tag{grid-column:2 / 5}
+  .kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;font-size:13px;color:#aab4bc}
+  .kv b{color:#fff;font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
+  .pbar{height:8px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden}
+  .pbar i{display:block;height:100%;width:0;background:#3b8fe0;transition:width .2s}
+  #menu input[type=file]{font-size:12px;color:#cfd6dc;max-width:100%}
   .base.r{width:calc(2 * var(--R) + var(--K) + 14px);height:calc(2 * var(--R) + var(--K) + 14px)}
   .base.r::before,.base.r::after{content:none}
   /* dwie strefy: lewa połowa = gaz, prawa = skręt; gałka pojawia się pod palcem */
@@ -138,7 +146,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
 <div id="menu" hidden>
   <div class="mhead">Ustawienia <button id="mclose" aria-label="Zamknij">&#10005;</button></div>
-  <div class="tabs"><button data-tab="obraz" class="on">Obraz</button><button data-tab="naped">Napęd</button><button data-tab="elrs">ELRS</button><button data-tab="wifi">Wi-Fi</button></div>
+  <div class="tabs"><button data-tab="obraz" class="on">Obraz</button><button data-tab="naped">Napęd</button><button data-tab="elrs">ELRS</button><button data-tab="wifi">Wi-Fi</button><button data-tab="sys">System</button></div>
   <div class="mbody" id="tab-obraz">
     <div class="grp"><label>Szybki wybór</label>
       <div class="seg" id="presets"><button data-p="0">Płynnie</button><button data-p="1">Balans</button><button data-p="2">Jakość</button></div>
@@ -187,6 +195,23 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
         <option value="3">Czerwony</option><option value="4">Zielony</option><option value="5">Niebieski</option><option value="6">Sepia</option>
       </select>
     </div>
+    <div class="sep"></div>
+    <div class="grp"><label>Zakłócenia i szum</label>
+      <p class="note">Poziome paski najczęściej biorą się z zasilania (patrz README). Te opcje mogą je ograniczyć.</p>
+    </div>
+    <div class="grp"><label>Taktowanie kamery</label>
+      <div class="seg" data-k="xc"><button data-v="20">20 MHz</button><button data-v="10">10 MHz – mniej pasków</button></div>
+    </div>
+    <div class="grp"><label for="gc">Limit wzmocnienia</label>
+      <select id="gc" data-k="gc">
+        <option value="-1">Domyślny</option><option value="0">2× – najmniej szumu</option><option value="1">4×</option>
+        <option value="2">8×</option><option value="3">16×</option><option value="4">32×</option><option value="5">64×</option>
+        <option value="6">128× – najjaśniej w ciemności</option>
+      </select>
+    </div>
+    <div class="row"><label for="bpc">Korekcja czarnych pikseli</label><input type="checkbox" id="bpc" data-k="bpc"></div>
+    <div class="row"><label for="wpc">Korekcja białych pikseli</label><input type="checkbox" id="wpc" data-k="wpc"></div>
+    <div class="row"><label for="lenc">Korekcja ciemnych rogów</label><input type="checkbox" id="lenc" data-k="lenc"></div>
     <button id="mreset">Przywróć domyślne</button>
     <p class="note" id="mnote">Ustawienia zapisują się w robocie i zostają po wyłączeniu.</p>
   </div>
@@ -205,10 +230,32 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       <input type="range" id="md" min="0" max="200" step="5">
       <div class="ends"><span>0</span><span>zwiększ, jeśli silniki buczą, ale nie ruszają</span></div>
     </div>
+    <div class="sep"></div>
+    <div class="grp"><label for="tg">Czułość skrętu <span class="val" data-hv="tg"></span></label>
+      <input type="range" id="tg" data-hk="tg" min="20" max="100" step="5"></div>
+    <div class="grp"><label for="mp">Maksymalna moc <span class="val" data-hv="mp"></span></label>
+      <input type="range" id="mp" data-hk="mp" min="20" max="100" step="5"></div>
+    <div class="grp"><label for="ac">Płynny rozruch <span class="val" data-hv="ac"></span></label>
+      <input type="range" id="ac" data-hk="ac" min="0" max="30" step="1">
+      <div class="ends"><span>wyłączony</span><span>3 s do pełnej mocy</span></div></div>
+    <div class="grp"><label for="dz">Martwa strefa gałek <span class="val" data-hv="dz"></span></label>
+      <input type="range" id="dz" data-hk="dz" min="0" max="30" step="1"></div>
+    <div class="grp"><label for="fo">Zatrzymanie bez sygnału z telefonu po <span class="val" data-hv="fo"></span></label>
+      <input type="range" id="fo" data-hk="fo" min="200" max="3000" step="100"></div>
+    <div class="pinrow"><label for="pf">Częstotliwość PWM</label>
+      <select id="pf" data-hk="pf">
+        <option value="100">100 Hz</option><option value="250">250 Hz</option><option value="500">500 Hz</option>
+        <option value="1000">1 kHz</option><option value="2000">2 kHz</option><option value="5000">5 kHz</option>
+        <option value="10000">10 kHz</option><option value="20000">20 kHz</option>
+      </select></div>
+    <p class="note">Niższa częstotliwość: lepszy rozruch na małej mocy, ale silniki piszczą. Wyższa: ciszej, ale L298N słabiej ciągnie. Zmiana działa po ponownym uruchomieniu.</p>
+    <div class="sep"></div>
     <div class="pinrow"><label for="lp">Pin diody flash</label><select id="lp" data-pin="lp"></select></div>
+    <div class="grp"><label for="lt">Jasność diody <span class="val" data-hv="lt"></span></label>
+      <input type="range" id="lt" data-hk="lt" min="1" max="100" step="1"></div>
     <div class="grp" id="hwmsg"></div>
     <button class="primary hwreboot">Zapisz i uruchom ponownie</button>
-    <p class="note">Piny i typ napędu zaczną działać po ponownym uruchomieniu robota. Odwrócenie kierunku i moc startowa działają od razu.</p>
+    <p class="note">Piny i typ napędu zaczną działać po ponownym uruchomieniu robota. Pozostałe ustawienia działają od razu.</p>
     <button id="hwreset" class="mreset">Przywróć domyślne</button>
   </div>
 
@@ -216,7 +263,15 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     <div class="pinrow"><label for="rp">Pin odbiornika (TX odbiornika)</label><select id="rp" data-pin="rp"></select></div>
     <div class="msg" id="rcst">…</div>
     <div class="grp"><label>Przypisanie kanałów</label><div class="grp" id="chmap"></div></div>
-    <div class="grp"><label>Podgląd kanałów na żywo</label><div class="grp" id="chview"></div></div>
+    <div class="grp"><label for="rm">Moc przy gazie na dole <span class="val" data-hv="rm"></span></label>
+      <input type="range" id="rm" data-hk="rm" min="0" max="100" step="5"></div>
+    <div class="grp"><label for="rd">Martwa strefa drążków <span class="val" data-hv="rd"></span></label>
+      <input type="range" id="rd" data-hk="rd" min="0" max="30" step="1"></div>
+    <div class="grp"><label for="rt">Utrata sygnału po <span class="val" data-hv="rt"></span></label>
+      <input type="range" id="rt" data-hk="rt" min="100" max="2000" step="50"></div>
+    <div class="grp"><label>Podgląd kanałów na żywo</label>
+      <p class="note">Ostatnia kolumna odwraca kanał, np. gdy drążek działa w złą stronę.</p>
+      <div class="grp" id="chview"></div></div>
     <div class="grp" id="rcmsg"></div>
     <button class="primary hwreboot">Zapisz i uruchom ponownie</button>
     <p class="note">Przypisanie kanałów działa od razu, zmiana pinu po ponownym uruchomieniu.</p>
@@ -248,7 +303,28 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     </div>
     <div class="grp" id="wmsg"></div>
     <button class="primary" id="wapply">Zapisz i uruchom ponownie</button>
-    <p class="note">Nie możesz się połączyć z robotem? Włącz i wyłącz go 3 razy z rzędu, za każdym razem na mniej niż 10 sekund. Wi-Fi wróci do ustawień domyślnych: sieć ESP32-Robot, hasło robot1234.</p>
+    <p class="note" id="wnote-reset">Nie możesz się połączyć z robotem? Włącz i wyłącz go 3 razy z rzędu, za każdym razem na mniej niż 10 sekund. Wi-Fi wróci do ustawień domyślnych: sieć ESP32-Robot, hasło robot1234.</p>
+  </div>
+
+  <div class="mbody" id="tab-sys" hidden>
+    <div class="kv" id="sysinfo"></div>
+    <div class="sep"></div>
+    <div class="grp"><label>Aktualizacja przez Wi-Fi</label>
+      <p class="note">Pobierz z GitHub (zakładka Releases) plik kończący się na <b>-app.bin</b> i wybierz go tutaj. Ustawienia zostają.</p>
+      <input type="file" id="otafile" accept=".bin">
+      <div class="pbar" id="otabar"><i></i></div>
+      <button class="primary" id="otago" disabled>Wgraj aktualizację</button>
+      <div class="grp" id="otamsg"></div>
+    </div>
+    <div class="sep"></div>
+    <div class="grp"><label>Kopia ustawień</label>
+      <div class="inrow"><button class="small" id="bkdown">Zapisz do pliku</button><button class="small" id="bkpick">Wczytaj z pliku</button></div>
+      <input type="file" id="bkfile" accept=".json,application/json" hidden>
+      <p class="note">Plik zawiera ustawienia obrazu, napędu, aparatury i Wi-Fi, bez haseł.</p>
+      <div class="grp" id="bkmsg"></div>
+    </div>
+    <div class="sep"></div>
+    <button class="mreset" id="sysreboot">Uruchom robota ponownie</button>
   </div>
 </div>
 <div id="hint" class="hud">WASD / strzałki · Q/E bokiem (Mecanum) · F światło</div>
@@ -257,8 +333,8 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 (function(){
   var host = location.hostname || '192.168.4.1';
   var RADIUS = 85;          // zakres ruchu gałki (px)
-  var DEADZONE = 0.08;      // martwa strefa analogu
-  var TURN = 0.75;          // czułość skrętu
+  var DEADZONE = 0.08;      // martwa strefa gałek (z ustawień robota)
+  var TURN = 1;             // czułość skrętu ustawia robot (menu Napęd)
 
   // ---------- kamera ----------
   var cam = document.getElementById('cam');
@@ -317,7 +393,8 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   for (var ti = 0; ti < tabBtns.length; ti++) tabBtns[ti].addEventListener('click', function(){
     tab = this.dataset.tab;
     for (var j = 0; j < tabBtns.length; j++) tabBtns[j].classList.toggle('on', tabBtns[j] === this);
-    ['obraz', 'naped', 'elrs', 'wifi'].forEach(function(t){ document.getElementById('tab-' + t).hidden = t !== tab; });
+    ['obraz', 'naped', 'elrs', 'wifi', 'sys'].forEach(function(t){ document.getElementById('tab-' + t).hidden = t !== tab; });
+    if (tab === 'sys') loadSys();
     if (tab === 'naped' || tab === 'elrs') loadHw();
     if (tab === 'wifi') loadWifi();
   });
@@ -547,6 +624,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   // tryb gałek i przycisk światła zależą od konfiguracji aktywnej od startu robota
   function applyMode(){
     mecanum = hwS.bootMode === 1;
+    if (hwS.dz !== undefined) DEADZONE = hwS.dz / 100;
     gas.setAxis(mecanum ? 'xy' : 'y');
     lightEl.style.display = hwS.lightOk ? '' : 'none';
   }
@@ -586,6 +664,12 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     if (hwS.pending && !m.err.length) h += '<div class="msg ok">Zmiany zapisane – uruchom robota ponownie, żeby zaczęły działać.</div>';
     return h;
   }
+  function hwFmt(k, v){
+    if (v === undefined) return '';
+    if (k === 'ac') return v ? String(v / 10).replace('.', ',') + ' s' : 'wyłączony';
+    if (k === 'fo' || k === 'rt') return String(v / 1000).replace('.', ',') + ' s';
+    return v + '%';
+  }
   function renderHw(){
     if (!hwS) return;
     var mec = hwS.mode === 1, key = mec ? 'mec' : 'tank';
@@ -613,6 +697,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       ih += '<div class="row"><label for="inv' + i + '">' + l + '</label><input type="checkbox" id="inv' + i + '" data-inv="' + i + '"' + (hwS.inv[i] ? ' checked' : '') + '></div>';
     });
     document.getElementById('invs').innerHTML = ih;
+    var hk = menu.querySelectorAll('[data-hk]');
+    for (var h = 0; h < hk.length; h++) if (hwS[hk[h].dataset.hk] !== undefined) hk[h].value = String(hwS[hk[h].dataset.hk]);
+    var hv = menu.querySelectorAll('[data-hv]');
+    for (var h2 = 0; h2 < hv.length; h2++) hv[h2].textContent = hwFmt(hv[h2].dataset.hv, hwS[hv[h2].dataset.hv]);
     document.getElementById('md').value = hwS.md;
     document.getElementById('mdv').textContent = hwS.md;
     var m = hwMessages(), html = msgHtml(m);
@@ -634,9 +722,12 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     for (var q = 0; q < cs.length; q++) cs[q].value = String(hwS.c[+cs[q].dataset.ch]);
     if (!document.getElementById('chview').children.length){
       var vh = '';
-      for (var c2 = 1; c2 <= 16; c2++) vh += '<div class="chv" id="chv' + c2 + '"><span>CH' + c2 + '</span><span class="bar"><i></i></span><span class="us">–</span></div>';
+      for (var c2 = 1; c2 <= 16; c2++) vh += '<div class="chv" id="chv' + c2 + '"><span>CH' + c2 + '</span><span class="bar"><i></i></span><span class="us">–</span>' +
+        '<input type="checkbox" data-rev="' + (c2 - 1) + '" title="Odwróć CH' + c2 + '"></div>';
       document.getElementById('chview').innerHTML = vh;
     }
+    var rv = document.querySelectorAll('[data-rev]');
+    for (var r2 = 0; r2 < rv.length; r2++) rv[r2].checked = !!((hwS.rv >> +rv[r2].dataset.rev) & 1);
   }
   // zmiany w zakładkach Napęd / ELRS
   menu.addEventListener('change', function(e){
@@ -654,7 +745,19 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     } else if (t.id === 'md'){
       hwS.md = +t.value;
       setHw('md', hwS.md);
+    } else if (t.dataset.hk){
+      hwS[t.dataset.hk] = +t.value;
+      setHw(t.dataset.hk, +t.value);
+      if (t.dataset.hk === 'dz') DEADZONE = +t.value / 100;
+    } else if (t.dataset.rev !== undefined){
+      var bit = 1 << +t.dataset.rev;
+      hwS.rv = t.checked ? (hwS.rv | bit) : (hwS.rv & ~bit);
+      setHw('rv', hwS.rv);
     }
+  });
+  menu.addEventListener('input', function(e){
+    var k = e.target.dataset.hk, sh = k && menu.querySelector('[data-hv="' + k + '"]');
+    if (sh) sh.textContent = hwFmt(k, +e.target.value);
   });
   document.getElementById('md').addEventListener('input', function(){ document.getElementById('mdv').textContent = this.value; });
   menu.addEventListener('click', function(e){
@@ -780,6 +883,89 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     $('wmsg').innerHTML = '<div class="msg ok">Robot uruchamia się ponownie. ' + esc(where) + '</div>';
     stxt.textContent = 'uruchamianie ponowne…';
   });
+
+  // ---------- System (menu) ----------
+  function kb(b){ return Math.round(b / 1024) + ' KB'; }
+  function upTime(sec){
+    var h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s2 = sec % 60;
+    return (h ? h + ' h ' : '') + m + ' min ' + s2 + ' s';
+  }
+  var sysTimer = null;
+  function loadSys(){
+    fetch('/sys', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(j){
+      var rows = [
+        ['Wersja programu', j.ver], ['Czas pracy', upTime(j.up)], ['Ostatni restart', j.reset],
+        ['Wolna pamięć RAM', kb(j.heap) + ' z ' + kb(j.heapSize)], ['Najmniej RAM od startu', kb(j.heapMin)],
+        ['Wolna PSRAM', kb(j.psram) + ' z ' + kb(j.psramSize)], ['Rozmiar programu', kb(j.sketch)],
+        ['Miejsce na program', j.ota ? kb(j.otaSize) + ', wolne ' + kb(j.otaSize - j.sketch) : 'brak aktualizacji przez Wi-Fi']
+      ];
+      $('sysinfo').innerHTML = rows.map(function(r){ return '<span>' + r[0] + '</span><b>' + esc(r[1]) + '</b>'; }).join('');
+      if (!j.ota) $('otamsg').innerHTML = '<div class="msg warn">Ten układ pamięci nie obsługuje aktualizacji przez Wi-Fi. Wgraj raz kablem plik full.bin z wersji 1.3.0 lub nowszej.</div>';
+    }).catch(function(){});
+    clearTimeout(sysTimer);
+    sysTimer = setTimeout(function(){ if (!menu.hidden && tab === 'sys') loadSys(); }, 2000);
+  }
+  $('otafile').addEventListener('change', function(){
+    var f = this.files[0], bad = f && /full/i.test(f.name);
+    $('otago').disabled = !f || bad;
+    $('otamsg').innerHTML = bad ? '<div class="msg err">To plik do wgrywania kablem. Wybierz plik kończący się na -app.bin.</div>' : '';
+  });
+  $('otago').addEventListener('click', function(){
+    var f = $('otafile').files[0];
+    if (!f) return;
+    $('otago').disabled = true;
+    $('otamsg').innerHTML = '<div class="msg warn">Wgrywanie… Nie zamykaj strony. Robot w tym czasie stoi, a obraz jest wstrzymany.</div>';
+    var x = new XMLHttpRequest();
+    x.open('POST', '/update');
+    x.upload.onprogress = function(e){ if (e.lengthComputable) $('otabar').firstChild.style.width = (e.loaded / e.total * 100) + '%'; };
+    x.onload = function(){
+      $('otamsg').innerHTML = x.status === 200
+        ? '<div class="msg ok">Gotowe. Robot uruchamia się ponownie – strona połączy się sama za kilka sekund.</div>'
+        : '<div class="msg err">Nie udało się: ' + esc(x.responseText) + '</div>';
+      if (x.status !== 200) $('otago').disabled = false;
+    };
+    x.onerror = function(){ $('otamsg').innerHTML = '<div class="msg err">Przerwane połączenie. Spróbuj ponownie bliżej robota.</div>'; $('otago').disabled = false; };
+    x.send(f);
+  });
+
+  // kopia ustawień: plik JSON z obrazem, napędem, aparaturą i Wi-Fi (bez haseł)
+  var CAM_KEYS = ['fs', 'q', 'br', 'ct', 'sa', 'wb', 'ae', 'al', 'ex', 'fx', 'hm', 'vf', 'rot', 'xc', 'gc', 'bpc', 'wpc', 'lenc'];
+  var HW_KEYS = ['mode', 'mot', 'md', 'lp', 'rp', 'pf', 'fo', 'rt', 'rv', 'tg', 'mp', 'ac', 'lt', 'dz', 'rd', 'rm'];
+  function getJson(u){ return fetch(u, { cache: 'no-store' }).then(function(r){ return r.json(); }); }
+  $('bkdown').addEventListener('click', function(){
+    Promise.all([getJson('/settings'), getJson('/hw'), getJson('/wifi'), getJson('/sys')]).then(function(r){
+      var out = { app: 'esp32-cam-robot', ver: r[3].ver, cam: {}, hw: { p: r[1].p, inv: r[1].inv, c: r[1].c }, wifi: {} };
+      CAM_KEYS.forEach(function(k){ out.cam[k] = r[0][k]; });
+      HW_KEYS.forEach(function(k){ out.hw[k] = r[1][k]; });
+      ['mode', 'keep', 'ch', 'as', 'ss', 'hn'].forEach(function(k){ out.wifi[k] = r[2][k]; });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }));
+      a.download = 'robot-ustawienia.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      $('bkmsg').innerHTML = '<div class="msg ok">Zapisano plik robot-ustawienia.json.</div>';
+    }).catch(function(){ $('bkmsg').innerHTML = '<div class="msg err">Nie udało się odczytać ustawień z robota.</div>'; });
+  });
+  $('bkpick').addEventListener('click', function(){ $('bkfile').click(); });
+  $('bkfile').addEventListener('change', function(){
+    var f = this.files[0];
+    if (!f) return;
+    f.text().then(function(t){
+      var d = JSON.parse(t);
+      if (d.app !== 'esp32-cam-robot' || !d.cam || !d.hw) throw new Error();
+      CAM_KEYS.forEach(function(k){ if (d.cam[k] !== undefined) send('C ' + k + ' ' + d.cam[k]); });
+      HW_KEYS.forEach(function(k){ if (d.hw[k] !== undefined) send('H ' + k + ' ' + d.hw[k]); });
+      (d.hw.p || []).forEach(function(v, i){ send('H p' + i + ' ' + v); });
+      (d.hw.inv || []).forEach(function(v, i){ send('H inv' + i + ' ' + v); });
+      (d.hw.c || []).forEach(function(v, i){ send('H c' + i + ' ' + v); });
+      if (d.wifi) ['mode', 'keep', 'ch', 'as', 'ss', 'hn'].forEach(function(k){
+        if (d.wifi[k] !== undefined) send('W ' + k + ' ' + encodeURIComponent(d.wifi[k]));
+      });
+      send('W apply 1');                  // zapisuje wszystko i uruchamia robota ponownie
+      $('bkmsg').innerHTML = '<div class="msg ok">Wczytano. Robot uruchamia się ponownie. Hasła Wi-Fi zostały bez zmian.</div>';
+    }).catch(function(){ $('bkmsg').innerHTML = '<div class="msg err">To nie jest plik ustawień robota.</div>'; });
+    this.value = '';
+  });
+  $('sysreboot').addEventListener('click', function(){ send('H reboot 1'); stxt.textContent = 'uruchamianie ponowne…'; menu.hidden = true; });
 
   function pushNow(){ var c = command(); send(c); last = c; lastSent = Date.now(); }
   setInterval(function(){
