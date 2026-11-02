@@ -13,6 +13,7 @@
  */
 
 #include <WiFi.h>
+#include <Preferences.h>
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -49,7 +50,7 @@ const char *STA_PASS = "TwojeHaslo";
 #define PIN_LIGHT   4
 #define LIGHT_DUTY  60   // jasność 0..255 (pełna moc mocno grzeje i oślepia)
 
-// Obrót obrazu, jeśli kamera jest zamontowana do góry nogami
+// Domyślne odbicie obrazu (później można je zmienić w menu ustawień na stronie)
 #define CAM_VFLIP   false
 #define CAM_HMIRROR false
 
@@ -94,17 +95,45 @@ static volatile uint8_t rcState = 0;
 static bool cameraOk = false;
 static bool hasPsram = false;
 
-// ---------- Presety jakości wideo ----------
-// Mniejsza rozdzielczość / wyższa liczba "quality" = mniej danych = więcej klatek/s.
-// jpeg quality: 10 (najlepsza) .. 63 (najgorsza)
-struct VideoPreset { framesize_t size; int quality; const char *name; };
-static const VideoPreset VIDEO_PRESETS[] = {
-  { FRAMESIZE_QVGA, 14, "Plynnie 320x240" },   // 0 – najwięcej FPS, najmniejsze opóźnienie
-  { FRAMESIZE_VGA,  12, "Balans 640x480" },    // 1
-  { FRAMESIZE_SVGA, 10, "Jakosc 800x600" },    // 2 – najładniej, ale wolniej
+// ---------- Ustawienia obrazu (menu na stronie, zapisywane w pamięci ESP) ----------
+// Rozdzielczości dostępne w menu – indeks w tej tablicy to wartość "fs"
+static const framesize_t FRAME_SIZES[] = {
+  FRAMESIZE_QVGA,   // 0: 320x240
+  FRAMESIZE_CIF,    // 1: 400x296
+  FRAMESIZE_VGA,    // 2: 640x480
+  FRAMESIZE_SVGA,   // 3: 800x600
+  FRAMESIZE_XGA,    // 4: 1024x768
+  FRAMESIZE_HD,     // 5: 1280x720
 };
-#define VIDEO_PRESET_COUNT (sizeof(VIDEO_PRESETS) / sizeof(VIDEO_PRESETS[0]))
-#define VIDEO_PRESET_DEFAULT 1
+#define FRAME_SIZE_COUNT (int)(sizeof(FRAME_SIZES) / sizeof(FRAME_SIZES[0]))
+
+#define CAM_SETTINGS_VERSION 1
+struct CamSettings {
+  int8_t  ver;
+  int8_t  fs;   // rozdzielczość (indeks FRAME_SIZES)
+  int8_t  q;    // jakość JPEG 10 (najlepsza) .. 40
+  int8_t  br;   // jasność -2..2
+  int8_t  ct;   // kontrast -2..2
+  int8_t  sa;   // nasycenie -2..2
+  int8_t  wb;   // balans bieli: 0 auto, 1 słońce, 2 pochmurno, 3 biuro, 4 dom
+  int8_t  ae;   // automatyczna ekspozycja 0/1
+  int8_t  al;   // korekta ekspozycji -2..2
+  int16_t ex;   // ręczny czas naświetlania 0..1200 (gdy ae = 0)
+  int8_t  fx;   // efekt: 0 brak, 1 negatyw, 2 cz-b, 3 czerwony, 4 zielony, 5 niebieski, 6 sepia
+  int8_t  hm;   // odbicie lustrzane 0/1
+  int8_t  vf;   // odwrócenie w pionie 0/1
+  int16_t rot;  // obrót w przeglądarce: 0, 90, 180, 270
+};
+static const CamSettings CAM_DEFAULTS = {
+  CAM_SETTINGS_VERSION, 2, 12, 0, 0, 0, 0, 1, 0, 300, 0, CAM_HMIRROR, CAM_VFLIP, 0
+};
+static CamSettings cam = CAM_DEFAULTS;
+static volatile bool camDirty = false;
+static volatile unsigned long camDirtyMs = 0;
+static Preferences prefs;
+
+static volatile uint32_t frameCount = 0;   // licznik klatek strumienia (do FPS)
+static volatile int streamFps = 0;
 
 httpd_handle_t webHttpd = NULL;
 httpd_handle_t streamHttpd = NULL;
@@ -182,14 +211,67 @@ static void motorsInit() {
   pwmWrite(PIN_LIGHT, CH_LIGHT, 0);
 }
 
-static void applyVideoPreset(int idx) {
+// ---------- Kamera: ustawienia ----------
+
+static void camApplyAll() {
   if (!cameraOk) return;
-  if (idx < 0 || idx >= (int)VIDEO_PRESET_COUNT) return;
-  if (!hasPsram) idx = 0;             // bez PSRAM tylko najmniejsza rozdzielczość
   sensor_t *s = esp_camera_sensor_get();
-  s->set_framesize(s, VIDEO_PRESETS[idx].size);
-  s->set_quality(s, VIDEO_PRESETS[idx].quality);
-  Serial.printf("Wideo: %s\n", VIDEO_PRESETS[idx].name);
+  int fs = hasPsram ? cam.fs : 0;     // bez PSRAM tylko najmniejsza rozdzielczość
+  s->set_framesize(s, FRAME_SIZES[fs]);
+  s->set_quality(s, cam.q);
+  s->set_brightness(s, cam.br);
+  s->set_contrast(s, cam.ct);
+  s->set_saturation(s, cam.sa);
+  s->set_whitebal(s, 1);
+  s->set_awb_gain(s, 1);
+  s->set_wb_mode(s, cam.wb);
+  s->set_exposure_ctrl(s, cam.ae);
+  s->set_ae_level(s, cam.al);
+  if (!cam.ae) s->set_aec_value(s, cam.ex);
+  s->set_special_effect(s, cam.fx);
+  s->set_hmirror(s, cam.hm);
+  s->set_vflip(s, cam.vf);
+}
+
+// Ustawia jeden parametr, np. camSet("br", 1). Zwraca false dla nieznanej nazwy.
+static bool camSet(const char *key, int v) {
+  if      (!strcmp(key, "fs")) cam.fs = constrain(v, 0, FRAME_SIZE_COUNT - 1);
+  else if (!strcmp(key, "q"))  cam.q  = constrain(v, 10, 40);
+  else if (!strcmp(key, "br")) cam.br = constrain(v, -2, 2);
+  else if (!strcmp(key, "ct")) cam.ct = constrain(v, -2, 2);
+  else if (!strcmp(key, "sa")) cam.sa = constrain(v, -2, 2);
+  else if (!strcmp(key, "wb")) cam.wb = constrain(v, 0, 4);
+  else if (!strcmp(key, "ae")) cam.ae = v ? 1 : 0;
+  else if (!strcmp(key, "al")) cam.al = constrain(v, -2, 2);
+  else if (!strcmp(key, "ex")) cam.ex = constrain(v, 0, 1200);
+  else if (!strcmp(key, "fx")) cam.fx = constrain(v, 0, 6);
+  else if (!strcmp(key, "hm")) cam.hm = v ? 1 : 0;
+  else if (!strcmp(key, "vf")) cam.vf = v ? 1 : 0;
+  else if (!strcmp(key, "rot")) cam.rot = ((v / 90) & 3) * 90;
+  else if (!strcmp(key, "reset")) cam = CAM_DEFAULTS;
+  else return false;
+  camApplyAll();
+  camDirty = true;                    // zapis do pamięci w loop(), z opóźnieniem
+  camDirtyMs = millis();
+  return true;
+}
+
+static void camLoad() {
+  prefs.begin("cam", true);
+  CamSettings tmp;
+  if (prefs.getBytesLength("s") == sizeof(tmp) &&
+      prefs.getBytes("s", &tmp, sizeof(tmp)) == sizeof(tmp) &&
+      tmp.ver == CAM_SETTINGS_VERSION) {
+    cam = tmp;
+  }
+  prefs.end();
+}
+
+static void camSave() {
+  prefs.begin("cam", false);
+  prefs.putBytes("s", &cam, sizeof(cam));
+  prefs.end();
+  Serial.println("Zapisano ustawienia obrazu");
 }
 
 // ---------- Odbiornik ELRS (protokół CRSF, 420000 bodów) ----------
@@ -326,7 +408,7 @@ static void rcUpdate() {
 // ---------- Komendy z przeglądarki ----------
 // "M x y"  – ruch, x i y w zakresie -100..100
 // "L 0|1"  – światło
-// "Q 0..2" – preset jakości wideo
+// "C k v"  – ustawienie obrazu, np. "C br 1" (nazwy w struct CamSettings)
 // "P"      – ping (podtrzymanie failsafe)
 
 static void handleCommand(const char *cmd) {
@@ -341,9 +423,11 @@ static void handleCommand(const char *cmd) {
     case 'L':
       if (sscanf(cmd + 1, "%d", &a) == 1) lightOn = (a != 0);
       break;
-    case 'Q':
-      if (sscanf(cmd + 1, "%d", &a) == 1) applyVideoPreset(a);
+    case 'C': {
+      char key[8];
+      if (sscanf(cmd + 1, "%7s %d", key, &a) == 2) camSet(key, a);
       break;
+    }
     default:
       break;
   }
@@ -356,6 +440,19 @@ static esp_err_t indexHandler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
+// Aktualne ustawienia obrazu jako JSON – strona pobiera je przy starcie
+static esp_err_t settingsHandler(httpd_req_t *req) {
+  char json[256];
+  snprintf(json, sizeof(json),
+           "{\"fs\":%d,\"q\":%d,\"br\":%d,\"ct\":%d,\"sa\":%d,\"wb\":%d,\"ae\":%d,"
+           "\"al\":%d,\"ex\":%d,\"fx\":%d,\"hm\":%d,\"vf\":%d,\"rot\":%d,\"psram\":%d}",
+           cam.fs, cam.q, cam.br, cam.ct, cam.sa, cam.wb, cam.ae, cam.al, cam.ex, cam.fx,
+           cam.hm, cam.vf, cam.rot, hasPsram ? 1 : 0);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t wsHandler(httpd_req_t *req) {
@@ -382,9 +479,9 @@ static esp_err_t wsHandler(httpd_req_t *req) {
   if (frame.type != HTTPD_WS_TYPE_TEXT) return ESP_OK;
   handleCommand((const char *)buf);
 
-  // Odpowiedź ze stanem: "R <stan aparatury> <światło>"
-  char out[16];
-  int olen = snprintf(out, sizeof(out), "R %d %d", rcState, lightOn ? 1 : 0);
+  // Odpowiedź ze stanem: "R <stan aparatury> <światło> <fps>"
+  char out[24];
+  int olen = snprintf(out, sizeof(out), "R %d %d %d", rcState, lightOn ? 1 : 0, streamFps);
   httpd_ws_frame_t reply;
   memset(&reply, 0, sizeof(reply));
   reply.type = HTTPD_WS_TYPE_TEXT;
@@ -421,6 +518,7 @@ static esp_err_t streamHandler(httpd_req_t *req) {
 
     esp_camera_fb_return(fb);
     if (res != ESP_OK) break;         // klient się rozłączył
+    frameCount++;
   }
   return res;
 }
@@ -437,6 +535,12 @@ static void startServers() {
   indexUri.method = HTTP_GET;
   indexUri.handler = indexHandler;
 
+  httpd_uri_t settingsUri;
+  memset(&settingsUri, 0, sizeof(settingsUri));
+  settingsUri.uri = "/settings";
+  settingsUri.method = HTTP_GET;
+  settingsUri.handler = settingsHandler;
+
   httpd_uri_t wsUri;
   memset(&wsUri, 0, sizeof(wsUri));
   wsUri.uri = "/ws";
@@ -446,6 +550,7 @@ static void startServers() {
 
   if (httpd_start(&webHttpd, &config) == ESP_OK) {
     httpd_register_uri_handler(webHttpd, &indexUri);
+    httpd_register_uri_handler(webHttpd, &settingsUri);
     httpd_register_uri_handler(webHttpd, &wsUri);
   }
 
@@ -492,8 +597,8 @@ static bool cameraInit() {
 
   hasPsram = psramFound();
   if (hasPsram) {
-    // bufory alokujemy dla największego presetu, potem schodzimy do domyślnego
-    c.frame_size = FRAMESIZE_SVGA;
+    // bufory alokujemy dla największej rozdzielczości z menu, potem schodzimy do zapisanej
+    c.frame_size = FRAME_SIZES[FRAME_SIZE_COUNT - 1];
     c.jpeg_quality = 10;
     c.fb_count = 2;
     c.fb_location = CAMERA_FB_IN_PSRAM;
@@ -510,11 +615,9 @@ static bool cameraInit() {
     return false;
   }
 
-  sensor_t *s = esp_camera_sensor_get();
-  s->set_vflip(s, CAM_VFLIP);
-  s->set_hmirror(s, CAM_HMIRROR);
   cameraOk = true;
-  applyVideoPreset(VIDEO_PRESET_DEFAULT);
+  camLoad();
+  camApplyAll();
   return true;
 }
 
@@ -589,6 +692,22 @@ void loop() {
   if (l != lightApplied) {
     pwmWrite(PIN_LIGHT, CH_LIGHT, l ? LIGHT_DUTY : 0);
     lightApplied = l;
+  }
+
+  // FPS strumienia
+  static unsigned long fpsMs = 0;
+  static uint32_t fpsFrames = 0;
+  if (millis() - fpsMs >= 1000) {
+    uint32_t f = frameCount;
+    streamFps = f - fpsFrames;
+    fpsFrames = f;
+    fpsMs = millis();
+  }
+
+  // Zapis ustawień obrazu 3 s po ostatniej zmianie (oszczędza pamięć flash)
+  if (camDirty && millis() - camDirtyMs > 3000) {
+    camDirty = false;
+    camSave();
   }
 
   delay(2);

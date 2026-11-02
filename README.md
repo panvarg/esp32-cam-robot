@@ -10,10 +10,14 @@ Robot sterowany z telefonu przez przeglądarkę: obraz z kamery na pełnym ekran
 - Na telefonie łączysz się z tą siecią i otwierasz **http://192.168.4.1**.
 - Sterujesz dwoma kciukami, jak w grach wyścigowych. **Lewa połowa ekranu to gaz** (góra = przód, dół = tył), **prawa połowa to skręt** (lewo/prawo). Gałka pojawia się tam, gdzie dotkniesz. Skręt bez gazu obraca robota w miejscu.
 - Na górze ekranu są przycisk światła (dioda flash) i regulacja mocy (20–100%).
-- W prawym górnym rogu wybierasz jakość obrazu. Wybór jest zapamiętywany w przeglądarce:
-  - **Płynnie**: 320×240, najwięcej klatek i najmniejsze opóźnienie, najlepsze do szybkiej jazdy
-  - **Balans**: 640×480 (domyślnie)
-  - **Jakość**: 800×600, ładniejszy obraz, ale mniej klatek i większe opóźnienie
+- Przycisk **⚙** otwiera **menu ustawień obrazu**. Ustawienia zapisują się w pamięci robota i zostają po wyłączeniu:
+  - szybki wybór: **Płynnie** (320×240), **Balans** (640×480), **Jakość** (800×600);
+  - rozdzielczość od 320×240 do 1280×720 i kompresja JPEG;
+  - obrót o 0/90/180/270°, odbicie lustrzane i odwrócenie w pionie;
+  - jasność, kontrast, nasycenie i balans bieli;
+  - automatyczna albo ręczna ekspozycja;
+  - efekty: negatyw, czarno-biały, sepia i inne.
+- Obok statusu połączenia widać aktualną liczbę klatek na sekundę (FPS).
 - Na komputerze możesz sterować klawiszami WASD lub strzałkami, a `F` włącza światło.
 - **Failsafe:** jeśli przez 0,6 s nie przyjdzie żadna komenda (zerwane Wi-Fi, zamknięta karta), silniki się zatrzymują.
 
@@ -134,8 +138,7 @@ Wszystkie ustawienia są na górze pliku `esp32_cam_robot.ino`:
 | `AP_SSID`, `AP_PASS` | nazwa i hasło sieci robota |
 | `INVERT_LEFT`, `INVERT_RIGHT` | odwraca kierunek koła, gdy kręci się w złą stronę |
 | `MIN_DUTY` | minimalne wypełnienie PWM, przy którym silniki ruszają (zwiększ, jeśli robot „buczy”, ale nie jedzie) |
-| `CAM_VFLIP`, `CAM_HMIRROR` | obrót i odbicie obrazu z kamery |
-| `VIDEO_PRESETS` | rozdzielczość i kompresja JPEG dla przycisków Płynnie/Balans/Jakość (quality: 10 = najlepsza, 63 = najgorsza) |
+| `CAM_VFLIP`, `CAM_HMIRROR` | domyślne odbicie obrazu (potem zmienisz je w menu ⚙ na stronie) |
 | `LIGHT_DUTY` | jasność diody flash |
 | `FAILSAFE_MS` | po ilu ms bez sygnału robot staje |
 
