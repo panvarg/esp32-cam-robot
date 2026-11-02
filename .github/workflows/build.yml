@@ -27,10 +27,15 @@ jobs:
       - name: Compile
         run: |
           arduino-cli compile \
-            --fqbn esp32:esp32:esp32cam:PartitionScheme=huge_app \
+            --fqbn esp32:esp32:esp32cam \
             --warnings default \
             --output-dir build \
             esp32_cam_robot
+
+      - name: Check partition table (OTA)
+        run: |
+          python3 "$(find ~/.arduino15/packages/esp32 -name gen_esp32part.py | head -1)" build/esp32_cam_robot.ino.partitions.bin | tee parts.txt
+          grep -q "ota_1" parts.txt
 
       - uses: actions/upload-artifact@v4
         with:

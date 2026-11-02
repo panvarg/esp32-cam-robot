@@ -32,7 +32,7 @@ jobs:
       - name: Compile
         run: |
           arduino-cli compile \
-            --fqbn esp32:esp32:esp32cam:PartitionScheme=huge_app \
+            --fqbn esp32:esp32:esp32cam \
             --output-dir build \
             esp32_cam_robot
           ls -la build

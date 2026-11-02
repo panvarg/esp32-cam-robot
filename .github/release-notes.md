@@ -2,6 +2,14 @@ Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu
 
 ## Co nowego w v1.3.0
 
+**Ważne – jednorazowo kablem:** ta wersja zmienia układ pamięci, żeby dało się aktualizować przez Wi-Fi. Wgraj `…-full.bin` programatorem, tak jak dotąd. Wgranie `full.bin` kasuje ustawienia, więc wcześniej zanotuj piny i ustawienia Wi-Fi. Następne wersje wgrasz już przez Wi-Fi (plik `…-app.bin`), a ustawienia zostaną.
+
+- **zakładka System:** wersja, czas pracy, przyczyna ostatniego restartu, wolna pamięć RAM i PSRAM, miejsce na program
+- **aktualizacja przez Wi-Fi:** wgranie pliku `…-app.bin` z poziomu strony, z paskiem postępu
+- **kopia ustawień:** zapis wszystkich ustawień do pliku i wczytanie z pliku (bez haseł Wi-Fi)
+- **Napęd:** czułość skrętu, maksymalna moc, płynny rozruch, martwa strefa gałek, czas failsafe, częstotliwość PWM, jasność diody
+- **ELRS:** moc przy gazie na dole, martwa strefa drążków, czas utraty sygnału, odwracanie kanałów
+- **Obraz – zakłócenia:** taktowanie kamery 10/20 MHz, limit wzmocnienia, korekcja białych/czarnych pikseli i ciemnych rogów
 - **zakładka Wi-Fi:** sieć robota (nazwa, hasło, kanał) albo sieć domowa z wyszukiwaniem sieci; opcja utrzymania sieci robota równolegle; adres http://robot.local (nazwa do zmiany)
 - awaryjny reset Wi-Fi: 3 włączenia robota z rzędu, każde krótsze niż 10 s
 - pisanie w polach menu nie steruje już robotem (WASD/F)
@@ -47,7 +55,7 @@ Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu
 | Plik | Do czego |
 |---|---|
 | `esp32-cam-robot-…-full.bin` | **ten wgrywasz**: kompletny obraz (bootloader + partycje + program), adres **0x0** |
-| `esp32-cam-robot-…-app.bin` | sam program (adres 0x10000), np. do aktualizacji |
+| `esp32-cam-robot-…-app.bin` | sam program – do **aktualizacji przez Wi-Fi** (⚙ → System) |
 | `bootloader.bin`, `partitions.bin`, `boot_app0.bin` | osobne części (0x1000, 0x8000, 0xe000), gdy wolisz wgrywać je pojedynczo |
 
 ## Wgrywanie bez Arduino IDE

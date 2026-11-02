@@ -18,9 +18,14 @@ Robot sterowany z telefonu przez przeglądarkę: obraz z kamery na pełnym ekran
   - automatyczna albo ręczna ekspozycja;
   - efekty: negatyw, czarno-biały, sepia i inne.
 - Obok statusu połączenia widać aktualną liczbę klatek na sekundę (FPS).
-- Menu ⚙ ma cztery zakładki: **Obraz**, **Wi-Fi** (sieć robota albo domowa, opisane niżej), **Napęd** (typ napędu: czołg albo Mecanum, liczba silników, piny L298N, odwrócenie kierunku, moc startowa, pin diody) i **ELRS** (pin odbiornika, przypisanie kanałów, podgląd kanałów na żywo). Konfiguracja zapisuje się w robocie. Piny i typ napędu zaczynają działać po przycisku „Zapisz i uruchom ponownie”.
+- Menu ⚙ ma pięć zakładek. Wszystko zapisuje się w robocie. Piny, typ napędu i częstotliwość PWM zaczynają działać po przycisku „Zapisz i uruchom ponownie”, reszta od razu.
+  - **Obraz:** rozdzielczość, kompresja, obrót, kolory, ekspozycja, efekty, opcje na zakłócenia (taktowanie kamery 10/20 MHz, limit wzmocnienia, korekcja pikseli i rogów)
+  - **Napęd:** czołg albo Mecanum, liczba silników, piny L298N, odwrócenie kierunku, moc startowa, czułość skrętu, maksymalna moc, płynny rozruch, martwa strefa gałek, czas failsafe, częstotliwość PWM, pin i jasność diody
+  - **ELRS:** pin odbiornika, przypisanie kanałów, moc przy gazie na dole, martwa strefa, czas utraty sygnału, podgląd 16 kanałów z odwracaniem
+  - **Wi-Fi:** sieć robota albo domowa (opisane niżej)
+  - **System:** wersja, pamięć, aktualizacja przez Wi-Fi, kopia ustawień do pliku, restart
 - Na komputerze możesz sterować klawiszami WASD lub strzałkami. Q/E to jazda bokiem (Mecanum), a `F` włącza światło.
-- **Failsafe:** jeśli przez 0,6 s nie przyjdzie żadna komenda (zerwane Wi-Fi, zamknięta karta), silniki się zatrzymują.
+- **Failsafe:** jeśli przez 0,6 s (do zmiany w menu) nie przyjdzie żadna komenda (zerwane Wi-Fi, zamknięta karta), silniki się zatrzymują.
 
 Sterowanie idzie przez WebSocket (port 80), a obraz jako strumień MJPEG (port 81).
 
@@ -155,12 +160,16 @@ W menu ⚙ → Wi-Fi wybierasz:
    `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
 2. W *Menedżerze płytek* zainstaluj **esp32 by Espressif Systems** (wersja 2.x lub 3.x).
 3. Otwórz `esp32_cam_robot/esp32_cam_robot.ino`.
-4. Wybierz *Płytka*: **AI Thinker ESP32-CAM** i *Partition Scheme*: **Huge APP**.
+4. Wybierz *Płytka*: **AI Thinker ESP32-CAM**. Ustawienie *Partition Scheme* nie ma znaczenia, bo plik `partitions.csv` w folderze szkicu wymusza układ pamięci z aktualizacją przez Wi-Fi.
 5. Podłącz ESP32-CAM na programatorze ESP32-CAM-MB przez USB, wybierz port i kliknij *Wgraj*.
    Jeśli wgrywanie się nie zaczyna, przytrzymaj **IO0** na programatorze, naciśnij i puść **RST**, a potem puść IO0.
 6. Otwórz Serial Monitor (115200), naciśnij RST i sprawdź komunikaty.
 
-**Bez Arduino IDE:** gotowy firmware znajdziesz w zakładce **Releases**. Plik `…-full.bin` wgrywasz pod adres `0x0` przez https://espressif.github.io/esptool-js/ (Chrome/Edge). Szczegóły są w opisie wydania.
+**Bez Arduino IDE:** gotowy firmware znajdziesz w zakładce **Releases**. Plik `…-full.bin` wgrywasz pod adres `0x0` przez https://espressif.github.io/esptool-js/ (Chrome/Edge). Szczegóły są w opisie wydania. Wgranie `full.bin` kasuje ustawienia robota.
+
+**Aktualizacja przez Wi-Fi (od wersji 1.3.0):** w menu ⚙ → System wybierz plik `…-app.bin` z Releases i kliknij „Wgraj aktualizację”. Nie potrzebujesz kabla ani programatora, a ustawienia zostają. Pierwszy raz, przy przejściu ze starszej wersji, trzeba wgrać `full.bin` kablem, bo zmienia się układ pamięci.
+
+**Kopia ustawień:** w menu ⚙ → System zapiszesz wszystkie ustawienia do pliku, a potem wczytasz je z powrotem, np. po wgraniu `full.bin` albo na drugim robocie. Hasła Wi-Fi nie trafiają do pliku.
 
 ## Konfiguracja
 
@@ -171,8 +180,6 @@ Obraz, napęd, piny i kanały aparatury ustawiasz na stronie, w menu ⚙. W plik
 | `DEF_AP_SSID`, `DEF_AP_PASS`, `DEF_HOSTNAME` | domyślne Wi-Fi (pierwszy start i awaryjny reset); zwykłe ustawienia są w menu ⚙ → Wi-Fi |
 | `HW_DEFAULTS` | domyślne piny, napęd i kanały aparatury (używane przy pierwszym uruchomieniu i po „Przywróć domyślne”) |
 | `CAM_VFLIP`, `CAM_HMIRROR` | domyślne odbicie obrazu (potem zmienisz je w menu ⚙ na stronie) |
-| `LIGHT_DUTY` | jasność diody flash |
-| `FAILSAFE_MS` | po ilu ms bez sygnału robot staje |
 
 Jeśli robot skręca w lewo, gdy wychylasz gałkę w prawo, zamień miejscami przewody silnika lewego i prawego (OUT1/2 ↔ OUT3/4) albo zamień piny lewej i prawej strony w menu ⚙ → Napęd.
 
