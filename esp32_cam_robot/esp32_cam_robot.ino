@@ -91,6 +91,7 @@ struct HwSettings {
   uint8_t stickDz;    // martwa strefa gałek na telefonie, %
   uint8_t rcDz;       // martwa strefa drążków aparatury, %
   uint8_t rcMinSpeed; // moc z aparatury przy gazie na dole, %
+  uint8_t driver;     // sterownik silników: 0 – L298N, 1 – TB6612FNG (tylko opisy i schemat na stronie)
 };
 #define HW_V1_SIZE offsetof(HwSettings, pwmFreq)
 static const HwSettings HW_DEFAULTS = {
@@ -111,7 +112,8 @@ static const HwSettings HW_DEFAULTS = {
   25,    // jasność diody, % (pełna moc mocno grzeje i oślepia)
   8,     // martwa strefa gałek, %
   5,     // martwa strefa aparatury, %
-  25     // moc z aparatury przy gazie na dole, %
+  25,    // moc z aparatury przy gazie na dole, %
+  0      // L298N
 };
 static HwSettings hw = HW_DEFAULTS;   // edytowane z menu
 static HwSettings hwBoot;             // aktywne od startu (piny i tryb zmieniają się po restarcie)
@@ -269,6 +271,7 @@ static void hwClamp(HwSettings &h) {
   h.stickDz = constrain(h.stickDz, 0, 30);
   h.rcDz = constrain(h.rcDz, 0, 30);
   h.rcMinSpeed = constrain(h.rcMinSpeed, 0, 100);
+  if (h.driver > 1) h.driver = 0;
 }
 
 static void hwLoad() {
@@ -396,6 +399,7 @@ static bool hwSet(const char *key, int v) {
   else if (!strcmp(key, "dz"))   hw.stickDz = constrain(v, 0, 30);
   else if (!strcmp(key, "rd"))   hw.rcDz = constrain(v, 0, 30);
   else if (!strcmp(key, "rm"))   hw.rcMinSpeed = constrain(v, 0, 100);
+  else if (!strcmp(key, "drv"))  hw.driver = v ? 1 : 0;
   else if (!strcmp(key, "reset")) hw = HW_DEFAULTS;
   else if (!strcmp(key, "reboot")) { rebootRequested = true; return true; }
   else return false;
@@ -761,13 +765,13 @@ static esp_err_t hwHandler(httpd_req_t *req) {
            "{\"mode\":%d,\"mot\":%d,\"p\":[%d,%d,%d,%d,%d,%d,%d,%d],\"inv\":[%d,%d,%d,%d],"
            "\"md\":%d,\"lp\":%d,\"rp\":%d,\"c\":[%d,%d,%d,%d,%d,%d],"
            "\"pf\":%d,\"fo\":%d,\"rt\":%d,\"rv\":%u,\"tg\":%d,\"mp\":%d,\"ac\":%d,\"lt\":%d,"
-           "\"dz\":%d,\"rd\":%d,\"rm\":%d,"
+           "\"dz\":%d,\"rd\":%d,\"rm\":%d,\"drv\":%d,"
            "\"bootMode\":%d,\"pending\":%d,\"lightOk\":%d,\"rcOk\":%d,\"serialOff\":%d}",
            h.mode, h.motors, h.pin[0], h.pin[1], h.pin[2], h.pin[3], h.pin[4], h.pin[5], h.pin[6], h.pin[7],
            h.inv[0], h.inv[1], h.inv[2], h.inv[3], h.minDuty, h.lightPin, h.rcPin,
            h.ch[0], h.ch[1], h.ch[2], h.ch[3], h.ch[4], h.ch[5],
            h.pwmFreq, h.failsafeMs, h.rcTimeout, (unsigned)h.rcRev, h.turnGain, h.maxPower, h.accel, h.lightPct,
-           h.stickDz, h.rcDz, h.rcMinSpeed,
+           h.stickDz, h.rcDz, h.rcMinSpeed, h.driver,
            hwBoot.mode, hwPending() ? 1 : 0, lightActive ? 1 : 0, rcActive ? 1 : 0, hwUsesUart0() ? 1 : 0);
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");

@@ -2,6 +2,8 @@ Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu
 
 ## Co nowego w v1.3.1
 
+- **schemat połączeń** w menu Napęd i ELRS: rysunek płytki ESP32-CAM z opisem każdego pinu i karty modułów (sterownik, przetwornica, odbiornik), liczone na żywo z ustawień
+- wybór sterownika silników: **L298N** albo **TB6612FNG** (nazwy pinów i zasilanie na schemacie)
 - wykrywanie modelu kamery (widoczny w ⚙ → System); dla **OV3660** przy pierwszym starcie obraz jest odwracany w pionie, a kolory mniej przesycone (jak w przykładzie Espressif)
 - polecenia, których dana kamera nie obsługuje, są pomijane zamiast ryzykować zawieszenie
 - README: podłączenie sterownika **TB6612FNG** i opis pinów płytki ESP32-CAM

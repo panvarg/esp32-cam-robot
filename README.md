@@ -20,7 +20,7 @@ Robot sterowany z telefonu przez przeglądarkę: obraz z kamery na pełnym ekran
 - Obok statusu połączenia widać aktualną liczbę klatek na sekundę (FPS).
 - Menu ⚙ ma pięć zakładek. Wszystko zapisuje się w robocie. Piny, typ napędu i częstotliwość PWM zaczynają działać po przycisku „Zapisz i uruchom ponownie”, reszta od razu.
   - **Obraz:** rozdzielczość, kompresja, obrót, kolory, ekspozycja, efekty, opcje na zakłócenia (taktowanie kamery 10/20 MHz, limit wzmocnienia, korekcja pikseli i rogów)
-  - **Napęd:** czołg albo Mecanum, liczba silników, piny L298N, odwrócenie kierunku, moc startowa, czułość skrętu, maksymalna moc, płynny rozruch, martwa strefa gałek, czas failsafe, częstotliwość PWM, pin i jasność diody
+  - **Napęd:** sterownik (L298N albo TB6612FNG), **schemat połączeń** (rysunek płytki ESP32-CAM z opisem każdego pinu i karty modułów, liczone na żywo z ustawień), czołg albo Mecanum, liczba silników, piny L298N, odwrócenie kierunku, moc startowa, czułość skrętu, maksymalna moc, płynny rozruch, martwa strefa gałek, czas failsafe, częstotliwość PWM, pin i jasność diody
   - **ELRS:** pin odbiornika, przypisanie kanałów, moc przy gazie na dole, martwa strefa, czas utraty sygnału, podgląd 16 kanałów z odwracaniem
   - **Wi-Fi:** sieć robota albo domowa (opisane niżej)
   - **System:** wersja, pamięć, aktualizacja przez Wi-Fi, kopia ustawień do pliku, restart

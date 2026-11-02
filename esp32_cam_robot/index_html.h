@@ -99,6 +99,20 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   .pbar{height:8px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden}
   .pbar i{display:block;height:100%;width:0;background:#3b8fe0;transition:width .2s}
   #menu input[type=file]{font-size:12px;color:#cfd6dc;max-width:100%}
+  /* schemat połączeń */
+  #wiring{position:fixed;inset:0;z-index:20;background:#0e1215;display:flex;flex-direction:column;touch-action:pan-y}
+  #wiring[hidden]{display:none}
+  #wiring .mhead{flex:none}
+  .wbody{overflow:auto;padding:12px 14px 24px;display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;touch-action:pan-y}
+  .wbody svg{width:440px;max-width:100%;height:auto;flex:none}
+  .wcards{display:flex;flex-direction:column;gap:10px;flex:1 1 280px;min-width:0}
+  .wcard{border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:10px 12px;background:rgba(255,255,255,.03)}
+  .wcard h4{margin:0 0 6px;font-size:13px;font-weight:600}
+  .wrow{display:flex;gap:8px;font-size:12px;line-height:1.7;color:#cfd6dc}
+  .wrow b{min-width:92px;font-weight:600}
+  .wrow .dot{width:8px;height:8px;border-radius:50%;margin-top:7px;flex:none}
+  .wnote{font-size:11px;color:#8a949c;margin:6px 0 0}
+  .wbtn{height:38px;border-radius:8px;border:1px solid #5aa8f0;background:rgba(59,143,224,.15);color:#cfe6ff;font-size:14px}
   .base.r{width:calc(2 * var(--R) + var(--K) + 14px);height:calc(2 * var(--R) + var(--K) + 14px)}
   .base.r::before,.base.r::after{content:none}
   /* dwie strefy: lewa połowa = gaz, prawa = skręt; gałka pojawia się pod palcem */
@@ -217,6 +231,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   </div>
 
   <div class="mbody" id="tab-naped" hidden>
+    <button class="wbtn wshow">Schemat połączeń</button>
+    <div class="grp"><label>Sterownik silników</label>
+      <div class="seg" data-h="drv"><button data-v="0">L298N</button><button data-v="1">TB6612FNG</button></div>
+    </div>
     <div class="grp"><label>Typ napędu</label>
       <div class="seg" data-h="mode"><button data-v="0">Czołg</button><button data-v="1">Mecanum</button></div>
     </div>
@@ -260,6 +278,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   </div>
 
   <div class="mbody" id="tab-elrs" hidden>
+    <button class="wbtn wshow">Schemat połączeń</button>
     <div class="pinrow"><label for="rp">Pin odbiornika (TX odbiornika)</label><select id="rp" data-pin="rp"></select></div>
     <div class="msg" id="rcst">…</div>
     <div class="grp"><label>Przypisanie kanałów</label><div class="grp" id="chmap"></div></div>
@@ -326,6 +345,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     <div class="sep"></div>
     <button class="mreset" id="sysreboot">Uruchom robota ponownie</button>
   </div>
+</div>
+<div id="wiring" hidden>
+  <div class="mhead">Schemat połączeń <button id="wclose" aria-label="Zamknij">&#10005;</button></div>
+  <div class="wbody"><div id="wsvg"></div><div class="wcards" id="wcards"></div></div>
 </div>
 <div id="hint" class="hud">WASD / strzałki · Q/E bokiem (Mecanum) · F światło</div>
 
@@ -654,6 +677,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     if (mp.indexOf(4) >= 0) warn.push('GPIO 4 steruje też diodą flash – będzie świecić podczas jazdy.');
     if (all.indexOf(2) >= 0) warn.push('GPIO 2: przy wgrywaniu programu odłącz od niego przewód.');
     if (all.indexOf(12) >= 0) warn.push('GPIO 12 musi mieć stan niski przy starcie – jeśli robot nie startuje, dodaj rezystor 10 kΩ do GND.');
+    if (hwS.drv === 1 && hwS.md > 70) warn.push('TB6612 nie traci napięcia jak L298N – zmniejsz minimalną moc startową do ok. 40–60.');
     if (hwS.mode === 1) warn.push('Mecanum potrzebuje 8 pinów, czyli wszystkich wolnych – nie zostaje pin dla odbiornika ELRS.');
     return { err: err, warn: warn };
   }
@@ -804,6 +828,124 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   }
   loadHw();
 
+  // ---------- schemat połączeń ----------
+  // Układ pinów płytki ESP32-CAM (AI-Thinker), widok od strony kamery
+  var BOARD_L = [['5V', 'p5v'], ['GND', 'gnd'], ['IO12', 12], ['IO13', 13], ['IO15', 15], ['IO14', 14], ['IO2', 2], ['IO4', 4]];
+  var BOARD_R = [['3V3', 'p33'], ['IO16', 'x16'], ['IO0', 'x0'], ['GND', 'gnd'], ['VCC', 'vcc'], ['U0R', 3], ['U0T', 1], ['GND/R', 'gndr']];
+  var WCOL = ['#5aa8f0', '#f0a35a', '#5ad08f', '#c58af0'];   // koła / strony
+  var C_LED = '#ffd84d', C_RC = '#ff7eb6', C_PWR = '#ff6b5a', C_GND = '#9aa7b0', C_OFF = '#55606a';
+
+  // co jest podłączone do każdego pinu, według ustawień z menu
+  function wiringMap(){
+    var m = {}, mec = hwS.mode === 1, tb = hwS.drv === 1, n = mec ? 8 : 4;
+    var IN = tb ? ['AIN1', 'AIN2', 'BIN1', 'BIN2'] : ['IN1', 'IN2', 'IN3', 'IN4'];
+    var WH = mec ? ['LP', 'PP', 'LT', 'PT'] : ['lewa', 'prawa'];   // skróty – pełne nazwy w kartach
+    function add(pin, text, color){
+      if (m[pin]){ m[pin] = { t: '⚠ ' + m[pin].t + ' + ' + text, c: '#ff4d4d', bad: true }; return; }
+      m[pin] = { t: text, c: color };
+    }
+    for (var i = 0; i < n; i++){
+      var mod = mec ? (i < 4 ? '#1 ' : '#2 ') : '';
+      add(hwS.p[i], mod + IN[i % 4] + ' · ' + WH[i >> 1], WCOL[i >> 1]);
+    }
+    // dioda / odbiornik na pinie silnika robot po prostu wyłącza – to nie błąd
+    var motorPins = hwS.p.slice(0, n);
+    if (hwS.lp >= 0 && motorPins.indexOf(hwS.lp) < 0) add(hwS.lp, hwS.lp === 4 ? 'dioda (na płytce)' : 'dioda', C_LED);
+    if (hwS.rp >= 0 && motorPins.indexOf(hwS.rp) < 0 && hwS.rp !== hwS.lp) add(hwS.rp, 'ELRS TX', C_RC);
+    m.p5v = { t: tb ? '← przetwornica 5 V' : '← +5V z L298N', c: C_PWR };
+    m.gnd = { t: 'masa wspólna', c: C_GND };
+    m.p33 = tb ? { t: '→ VCC, STBY, PWMA/B', c: C_PWR } : { t: 'nie podłączaj', c: C_OFF };
+    m.x16 = { t: 'PSRAM – nie podłączaj', c: C_OFF };
+    m.x0 = { t: 'kamera – nie podłączaj', c: C_OFF };
+    m.vcc = { t: 'wyjście – nie zasilaj', c: C_OFF };
+    m.gndr = { t: 'nie używaj jako masy', c: C_OFF };
+    [1, 2, 3, 4, 12, 13, 14, 15].forEach(function(p){
+      if (!m[p]) m[p] = { t: p === 1 || p === 3 ? 'programator (' + (p === 3 ? 'RX' : 'TX') + ')' : 'wolny', c: C_OFF };
+    });
+    return m;
+  }
+
+  function wiringSvg(m){
+    var W = 440, top = 62, step = 30, bx = 160, bw = 120, H = top + 8 * step + 14;
+    var o = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">';
+    o += '<rect x="' + bx + '" y="4" width="' + bw + '" height="' + (H - 8) + '" rx="8" fill="#1c2329" stroke="#3a4650"/>';
+    o += '<rect x="' + (bx + 35) + '" y="12" width="50" height="40" rx="4" fill="#0a0c0e" stroke="#55606a"/>';
+    o += '<circle cx="' + (bx + 60) + '" cy="32" r="11" fill="#151a1e" stroke="#7a8590"/>';
+    o += '<text x="' + (bx + 60) + '" y="' + (H - 16) + '" fill="#8a949c" font-size="10" text-anchor="middle">ESP32-CAM</text>';
+    o += '<text x="' + (bx + 60) + '" y="' + (H - 5) + '" fill="#55606a" font-size="9" text-anchor="middle">widok od strony kamery</text>';
+    function pin(list, left){
+      list.forEach(function(p, i){
+        var y = top + i * step, x = left ? bx : bx + bw, f = m[p[1]] || { t: '', c: C_OFF };
+        o += '<circle cx="' + x + '" cy="' + y + '" r="6" fill="' + f.c + '" stroke="#0e1215" stroke-width="2"/>';
+        o += '<text x="' + (left ? x + 11 : x - 11) + '" y="' + (y + 4) + '" fill="#e6ebef" font-size="11" font-weight="600" text-anchor="' + (left ? 'start' : 'end') + '">' + p[0] + '</text>';
+        o += '<text x="' + (left ? x - 11 : x + 11) + '" y="' + (y + 4) + '" fill="' + f.c + '" font-size="10.5" text-anchor="' + (left ? 'end' : 'start') + '">' + esc(f.t) + '</text>';
+      });
+    }
+    pin(BOARD_L, true);
+    pin(BOARD_R, false);
+    return o + '</svg>';
+  }
+
+  function wrow(color, a, b){ return '<div class="wrow"><span class="dot" style="background:' + color + '"></span><b>' + a + '</b><span>' + b + '</span></div>'; }
+  function gp(p){ return p >= 0 ? (p === 1 ? 'U0T (IO1)' : p === 3 ? 'U0R (IO3)' : 'IO' + p) : '–'; }
+
+  function wiringCards(m){
+    var mec = hwS.mode === 1, tb = hwS.drv === 1, name = tb ? 'TB6612FNG' : 'L298N';
+    var IN = tb ? ['AIN1', 'AIN2', 'BIN1', 'BIN2'] : ['IN1', 'IN2', 'IN3', 'IN4'];
+    var OUT = tb ? ['AO1/AO2', 'BO1/BO2'] : ['OUT1/OUT2', 'OUT3/OUT4'];
+    var mods = mec ? 2 : (hwS.mot === 4 ? 2 : 1), h = '';
+    for (var k = 0; k < mods; k++){
+      var base = mec ? k * 4 : 0, title = name + (mods > 1 ? (k ? ' #2 (tył)' : ' #1 (przód)') : '');
+      var wheels = mec ? ['koło ' + (k ? 'lewe tylne (LT)' : 'lewe przednie (LP)'), 'koło ' + (k ? 'prawe tylne (PT)' : 'prawe przednie (PP)')]
+        : (mods > 1 ? [k ? 'silnik lewy tylny' : 'silnik lewy przedni', k ? 'silnik prawy tylny' : 'silnik prawy przedni'] : ['silnik lewy', 'silnik prawy']);
+      h += '<div class="wcard"><h4>' + title + '</h4>';
+      for (var i = 0; i < 4; i++){
+        var gi = base + i, col = WCOL[mec ? (base + i) >> 1 : i >> 1];
+        h += wrow(col, IN[i] + ' ←', gp(hwS.p[gi]) + (!mec && k ? ' (razem z #1)' : ''));
+      }
+      h += wrow(WCOL[mec ? base >> 1 : 0], OUT[0] + ' →', wheels[0]);
+      h += wrow(WCOL[mec ? (base >> 1) + 1 : 1], OUT[1] + ' →', wheels[1]);
+      if (tb){
+        h += wrow(C_PWR, 'VM ←', 'akumulator + (4,5–13,5 V)');
+        h += wrow(C_PWR, 'VCC, STBY ←', '3V3 z ESP32-CAM');
+        h += wrow(C_PWR, 'PWMA, PWMB ←', '3V3 (na stałe)');
+      } else {
+        h += wrow(C_PWR, '+12V ←', 'akumulator + (7–12 V)');
+        h += wrow(C_PWR, 'ENA, ENB', 'zworki założone');
+        h += wrow(C_PWR, '+5V →', k ? 'nie podłączaj (tylko z #1)' : '5V ESP32-CAM, zworka 5V-EN założona');
+      }
+      h += wrow(C_GND, 'GND', 'minus akumulatora i GND ESP32-CAM');
+      h += '</div>';
+    }
+    if (tb) h += '<div class="wcard"><h4>Przetwornica 5 V (step-down)</h4>' +
+      wrow(C_PWR, 'IN+ / IN− ←', 'akumulator') + wrow(C_PWR, 'OUT+ →', '5V ESP32-CAM') + wrow(C_GND, 'OUT− →', 'GND ESP32-CAM') + '</div>';
+    var mp = hwS.p.slice(0, mec ? 8 : 4);
+    if (hwS.rp >= 0 && (mp.indexOf(hwS.rp) >= 0 || hwS.rp === hwS.lp))
+      h += '<div class="wcard"><h4>Odbiornik ELRS</h4><p class="wnote">Wyłączony – pin ' + gp(hwS.rp) + ' jest zajęty' + (mec ? ' (Mecanum używa wszystkich wolnych pinów).' : '.') + '</p></div>';
+    else if (hwS.rp >= 0) h += '<div class="wcard"><h4>Odbiornik ELRS</h4>' +
+      wrow(C_RC, 'TX →', gp(hwS.rp)) + wrow(C_OFF, 'RX', 'niepodłączony') + wrow(C_PWR, 'VCC ←', '5V') + wrow(C_GND, 'GND', 'masa wspólna') + '</div>';
+    var notes = [];
+    if (hwS.pending) notes.push('Schemat pokazuje ustawienia z menu – zaczną działać po ponownym uruchomieniu robota.');
+    for (var key in m) if (m[key].bad) { notes.push('Na schemacie jest konflikt pinów – popraw go w zakładce Napęd.'); break; }
+    if (hwS.lp >= 0 && mp.indexOf(hwS.lp) >= 0) notes.push('Dioda jest wyłączona – jej pin ' + gp(hwS.lp) + ' steruje silnikiem' + (hwS.lp === 4 ? ', więc dioda na płytce będzie świecić podczas jazdy.' : '.'));
+    if (mp.indexOf(1) >= 0 || mp.indexOf(3) >= 0) notes.push('U0T/U0R (IO1/IO3) to piny programatora: przy wgrywaniu kablem odłącz od nich przewody.');
+    if (mec) notes.push('Skróty: LP – lewe przednie, PP – prawe przednie, LT – lewe tylne, PT – prawe tylne.');
+    if (!mec && hwS.mot === 4) notes.push('4 silniki: wejścia obu modułów łączysz równolegle z tymi samymi pinami ESP32.');
+    notes.push('Jeśli koło kręci się w złą stronę, zamień jego dwa przewody albo użyj „Odwróć kierunek”.');
+    h += '<div class="wcard"><h4>Uwagi</h4>' + notes.map(function(t){ return '<p class="wnote">' + t + '</p>'; }).join('') + '</div>';
+    return h;
+  }
+
+  function showWiring(){
+    if (!hwS) return;
+    var m = wiringMap();
+    document.getElementById('wsvg').innerHTML = wiringSvg(m);
+    document.getElementById('wcards').innerHTML = wiringCards(m);
+    document.getElementById('wiring').hidden = false;
+  }
+  menu.addEventListener('click', function(e){ if (e.target.classList.contains('wshow')) showWiring(); });
+  document.getElementById('wclose').addEventListener('click', function(){ document.getElementById('wiring').hidden = true; });
+
   // ---------- Wi-Fi (menu) ----------
   var wS = null, wMode = 0;
   function $(id){ return document.getElementById(id); }
@@ -930,7 +1072,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
   // kopia ustawień: plik JSON z obrazem, napędem, aparaturą i Wi-Fi (bez haseł)
   var CAM_KEYS = ['fs', 'q', 'br', 'ct', 'sa', 'wb', 'ae', 'al', 'ex', 'fx', 'hm', 'vf', 'rot', 'xc', 'gc', 'bpc', 'wpc', 'lenc'];
-  var HW_KEYS = ['mode', 'mot', 'md', 'lp', 'rp', 'pf', 'fo', 'rt', 'rv', 'tg', 'mp', 'ac', 'lt', 'dz', 'rd', 'rm'];
+  var HW_KEYS = ['mode', 'mot', 'md', 'lp', 'rp', 'pf', 'fo', 'rt', 'rv', 'tg', 'mp', 'ac', 'lt', 'dz', 'rd', 'rm', 'drv'];
   function getJson(u){ return fetch(u, { cache: 'no-store' }).then(function(r){ return r.json(); }); }
   $('bkdown').addEventListener('click', function(){
     Promise.all([getJson('/settings'), getJson('/hw'), getJson('/wifi'), getJson('/sys')]).then(function(r){
