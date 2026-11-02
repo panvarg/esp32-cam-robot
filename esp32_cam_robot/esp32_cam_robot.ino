@@ -142,6 +142,7 @@ static volatile int streamKB = 0;          // średni rozmiar klatki w KB
 #define FS_BASE_INIT 3                     // indeks FRAMESIZE_SVGA w FRAME_SIZES
 static int camInitFs = -1;
 static volatile bool camNeedReinit = false;
+static volatile bool camPause = false;     // strumień nie bierze nowych klatek (restart kamery)
 static SemaphoreHandle_t camMutex = NULL;
 
 static int camWantedInitFs() { return hasPsram ? max((int)cam.fs, FS_BASE_INIT) : 0; }
@@ -530,6 +531,12 @@ static esp_err_t streamHandler(httpd_req_t *req) {
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
   while (true) {
+    // Strumień ma wyższy priorytet niż loop(): bez tej pauzy od razu brałby mutex
+    // z powrotem i restart kamery w loop() czekałby w nieskończoność.
+    if (camPause) {
+      delay(20);
+      continue;
+    }
     xSemaphoreTake(camMutex, portMAX_DELAY);  // restart kamery czeka, aż klatka zostanie wysłana
     if (!cameraOk) {
       xSemaphoreGive(camMutex);
@@ -734,13 +741,18 @@ void loop() {
   }
 
   // Restart kamery z innym buforem (zmiana na / z 1024x768 lub HD)
+  // loop() nigdy nie czeka dłużej niż 1 s – tu działają też silniki, światło i failsafe
   if (camNeedReinit) {
-    camNeedReinit = false;
-    xSemaphoreTake(camMutex, portMAX_DELAY);
-    cameraOk = false;
-    esp_camera_deinit();
-    cameraStart();
-    xSemaphoreGive(camMutex);
+    drive(0, 0);                      // na czas restartu kamery robot stoi
+    camPause = true;
+    if (xSemaphoreTake(camMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+      camNeedReinit = false;
+      cameraOk = false;
+      esp_camera_deinit();
+      cameraStart();
+      xSemaphoreGive(camMutex);
+    }
+    camPause = false;
   }
 
   // FPS i średni rozmiar klatki strumienia
