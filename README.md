@@ -100,7 +100,9 @@ Ograniczenia: ESP32-CAM ma tylko 8 wolnych pinów, więc w trybie Mecanum zajęt
 - **GPIO 1 i 3** to port programatora: Serial Monitor jest wyłączony, a przy wgrywaniu programu trzeba odłączyć przewody z tych pinów. GPIO 1 przy starcie wysyła dane, więc podłączone koło może na chwilę drgnąć.
 - **GPIO 4** steruje też diodą flash, więc dioda świeci podczas jazdy.
 
-Sterowanie Mecanum z telefonu: **lewa gałka jest okrągła** (przód/tył i jazda bokiem), a **prawa obraca robota**. Koła ustaw tak, żeby rolki górnych części kół tworzyły „X” patrząc z góry. Jeśli jazda bokiem idzie po skosie, odwróć kierunek pojedynczego koła w menu.
+Sterowanie Mecanum z telefonu: **lewa gałka jest okrągła** (przód/tył i jazda bokiem), a **prawa obraca robota**. Pierwszy test zrób z robotem podniesionym:
+1. Do przodu: wszystkie 4 koła kręcą się do przodu. Jeśli któreś kręci się odwrotnie, zaznacz je w menu „Odwróć kierunek”.
+2. Bokiem: koła po przekątnej (lewe przednie i prawe tylne, prawe przednie i lewe tylne) kręcą się w tę samą stronę, a przednie i tylne po tej samej stronie w przeciwne. Jeśli na podłodze robot jedzie bokiem w złą stronę albo zamiast bokiem jedzie do przodu, zamień miejscami koła przednie z tylnymi, bo rolki muszą tworzyć właściwy wzór.
 
 ## Odbiornik ELRS (opcjonalnie)
 
