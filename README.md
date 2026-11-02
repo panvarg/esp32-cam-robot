@@ -18,7 +18,7 @@ Robot sterowany z telefonu przez przeglądarkę: obraz z kamery na pełnym ekran
   - automatyczna albo ręczna ekspozycja;
   - efekty: negatyw, czarno-biały, sepia i inne.
 - Obok statusu połączenia widać aktualną liczbę klatek na sekundę (FPS).
-- Menu ⚙ ma trzy zakładki: **Obraz**, **Napęd** (typ napędu: czołg albo Mecanum, liczba silników, piny L298N, odwrócenie kierunku, moc startowa, pin diody) i **ELRS** (pin odbiornika, przypisanie kanałów, podgląd kanałów na żywo). Konfiguracja zapisuje się w robocie. Piny i typ napędu zaczynają działać po przycisku „Zapisz i uruchom ponownie”.
+- Menu ⚙ ma cztery zakładki: **Obraz**, **Wi-Fi** (sieć robota albo domowa, opisane niżej), **Napęd** (typ napędu: czołg albo Mecanum, liczba silników, piny L298N, odwrócenie kierunku, moc startowa, pin diody) i **ELRS** (pin odbiornika, przypisanie kanałów, podgląd kanałów na żywo). Konfiguracja zapisuje się w robocie. Piny i typ napędu zaczynają działać po przycisku „Zapisz i uruchom ponownie”.
 - Na komputerze możesz sterować klawiszami WASD lub strzałkami. Q/E to jazda bokiem (Mecanum), a `F` włącza światło.
 - **Failsafe:** jeśli przez 0,6 s nie przyjdzie żadna komenda (zerwane Wi-Fi, zamknięta karta), silniki się zatrzymują.
 
@@ -139,6 +139,16 @@ Ważne:
 - GPIO 2 jest pinem rozruchowym. **Przy wgrywaniu programu odłącz przewód z GPIO 2**, inaczej ESP32 może nie wejść w tryb programowania. W normalnej pracy to nie przeszkadza.
 - Pin odbiornika zmienisz w menu ⚙ → ELRS. Ustaw „brak”, jeśli nie używasz odbiornika.
 
+## Wi-Fi
+
+W menu ⚙ → Wi-Fi wybierasz:
+- **Sieć robota** (domyślnie): robot tworzy własną sieć. Ustawiasz jej nazwę, hasło (min. 8 znaków) i kanał. Strona jest pod http://192.168.4.1.
+- **Sieć domowa**: robot łączy się z routerem. Przycisk „Szukaj” pokazuje sieci w zasięgu. Strona jest pod adresem IP nadanym przez router albo pod http://robot.local; nazwę `robot` możesz zmienić. Nie każdy telefon obsługuje adresy `.local`, w szczególności część telefonów z Androidem.
+  - Opcja **„Zostaw też sieć robota”** (zalecana) utrzymuje równolegle sieć robota, więc zawsze da się połączyć przez 192.168.4.1.
+  - Jeśli robot nie połączy się z routerem w 15 s, a sieć robota jest wyłączona, uruchomi ją awaryjnie.
+
+**Awaryjny reset Wi-Fi:** włącz i wyłącz robota 3 razy z rzędu, za każdym razem na mniej niż 10 sekund. Wi-Fi wróci do ustawień domyślnych: sieć `ESP32-Robot`, hasło `robot1234`.
+
 ## Wgrywanie (Arduino IDE)
 
 1. W *Preferencje → Dodatkowe adresy URL menedżera płytek* wpisz:
@@ -158,8 +168,7 @@ Obraz, napęd, piny i kanały aparatury ustawiasz na stronie, w menu ⚙. W plik
 
 | Ustawienie | Opis |
 |---|---|
-| `USE_AP_MODE` | `true`: robot tworzy własną sieć. `false`: łączy się z routerem (`STA_SSID`/`STA_PASS`), a gdy się nie uda, wraca do trybu AP |
-| `AP_SSID`, `AP_PASS` | nazwa i hasło sieci robota |
+| `DEF_AP_SSID`, `DEF_AP_PASS`, `DEF_HOSTNAME` | domyślne Wi-Fi (pierwszy start i awaryjny reset); zwykłe ustawienia są w menu ⚙ → Wi-Fi |
 | `HW_DEFAULTS` | domyślne piny, napęd i kanały aparatury (używane przy pierwszym uruchomieniu i po „Przywróć domyślne”) |
 | `CAM_VFLIP`, `CAM_HMIRROR` | domyślne odbicie obrazu (potem zmienisz je w menu ⚙ na stronie) |
 | `LIGHT_DUTY` | jasność diody flash |

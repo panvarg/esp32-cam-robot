@@ -84,6 +84,13 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   .chv .bar i{position:absolute;left:0;top:0;bottom:0;background:#3b8fe0}
   .chv.used{color:#fff}
   .chv .tag{grid-column:2 / 4;font-size:10px;color:#8fc6ff;margin-top:-4px}
+  #menu input[type=text],#menu input[type=password]{width:100%;min-width:0;height:36px;border-radius:8px;background:#22282e;color:#fff;
+    border:1px solid rgba(255,255,255,.3);padding:0 10px;font-size:14px;user-select:text;-webkit-user-select:text}
+  .inrow{display:flex;gap:6px}
+  .small{flex:none;height:36px;padding:0 12px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;font-size:13px}
+  .net{display:flex;justify-content:space-between;gap:8px;text-align:left;height:34px;padding:0 10px;border-radius:8px;
+    border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:#fff;font-size:13px;align-items:center}
+  .net span{color:#8a949c;font-size:11px;white-space:nowrap}
   .base.r{width:calc(2 * var(--R) + var(--K) + 14px);height:calc(2 * var(--R) + var(--K) + 14px)}
   .base.r::before,.base.r::after{content:none}
   /* dwie strefy: lewa połowa = gaz, prawa = skręt; gałka pojawia się pod palcem */
@@ -131,7 +138,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
 <div id="menu" hidden>
   <div class="mhead">Ustawienia <button id="mclose" aria-label="Zamknij">&#10005;</button></div>
-  <div class="tabs"><button data-tab="obraz" class="on">Obraz</button><button data-tab="naped">Napęd</button><button data-tab="elrs">ELRS</button></div>
+  <div class="tabs"><button data-tab="obraz" class="on">Obraz</button><button data-tab="naped">Napęd</button><button data-tab="elrs">ELRS</button><button data-tab="wifi">Wi-Fi</button></div>
   <div class="mbody" id="tab-obraz">
     <div class="grp"><label>Szybki wybór</label>
       <div class="seg" id="presets"><button data-p="0">Płynnie</button><button data-p="1">Balans</button><button data-p="2">Jakość</button></div>
@@ -214,6 +221,35 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     <button class="primary hwreboot">Zapisz i uruchom ponownie</button>
     <p class="note">Przypisanie kanałów działa od razu, zmiana pinu po ponownym uruchomieniu.</p>
   </div>
+
+  <div class="mbody" id="tab-wifi" hidden>
+    <div class="grp" id="wst"></div>
+    <div class="grp"><label>Tryb</label>
+      <div class="seg" id="wmode"><button data-v="0">Sieć robota</button><button data-v="1">Sieć domowa</button></div>
+    </div>
+    <div class="grp" id="w-sta">
+      <label for="wss">Sieć domowa (router)</label>
+      <div class="inrow"><input type="text" id="wss" maxlength="32" autocomplete="off"><button class="small" id="wscan">Szukaj</button></div>
+      <div class="grp" id="wlist"></div>
+      <label for="wsp">Hasło sieci domowej</label>
+      <input type="password" id="wsp" maxlength="63" placeholder="bez zmian" autocomplete="new-password">
+      <div class="row"><label for="wkeep">Zostaw też sieć robota (zalecane)</label><input type="checkbox" id="wkeep"></div>
+    </div>
+    <div class="grp" id="w-ap">
+      <label for="was">Nazwa sieci robota</label>
+      <input type="text" id="was" maxlength="32" autocomplete="off">
+      <label for="wap">Hasło sieci robota (min. 8 znaków)</label>
+      <input type="password" id="wap" maxlength="63" placeholder="bez zmian" autocomplete="new-password">
+      <div class="pinrow"><label for="wch">Kanał</label><select id="wch"></select></div>
+    </div>
+    <div class="grp"><label for="whn">Nazwa robota w sieci domowej</label>
+      <input type="text" id="whn" maxlength="24" autocomplete="off">
+      <p class="note" id="whn-note"></p>
+    </div>
+    <div class="grp" id="wmsg"></div>
+    <button class="primary" id="wapply">Zapisz i uruchom ponownie</button>
+    <p class="note">Nie możesz się połączyć z robotem? Włącz i wyłącz go 3 razy z rzędu, za każdym razem na mniej niż 10 sekund. Wi-Fi wróci do ustawień domyślnych: sieć ESP32-Robot, hasło robot1234.</p>
+  </div>
 </div>
 <div id="hint" class="hud">WASD / strzałki · Q/E bokiem (Mecanum) · F światło</div>
 
@@ -281,8 +317,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   for (var ti = 0; ti < tabBtns.length; ti++) tabBtns[ti].addEventListener('click', function(){
     tab = this.dataset.tab;
     for (var j = 0; j < tabBtns.length; j++) tabBtns[j].classList.toggle('on', tabBtns[j] === this);
-    ['obraz', 'naped', 'elrs'].forEach(function(t){ document.getElementById('tab-' + t).hidden = t !== tab; });
-    if (tab !== 'obraz') loadHw();
+    ['obraz', 'naped', 'elrs', 'wifi'].forEach(function(t){ document.getElementById('tab-' + t).hidden = t !== tab; });
+    if (tab === 'naped' || tab === 'elrs') loadHw();
+    if (tab === 'wifi') loadWifi();
   });
   document.getElementById('mclose').addEventListener('click', function(){ menu.hidden = true; });
 
@@ -456,12 +493,15 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
   // ---------- klawiatura ----------
   var keys = {};
+  function typing(e){ var t = e.target.tagName; return t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA'; }
   window.addEventListener('keydown', function(e){
+    if (typing(e)) return;            // pisanie w menu nie steruje robotem
     var k = e.key.toLowerCase();
     if (k === 'f' && !e.repeat) toggleLight();
     keys[k] = true;
   });
   window.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
+  window.addEventListener('blur', function(){ keys = {}; });
   function keyAxis(){
     var x = 0, y = 0;
     if (keys['w'] || keys['arrowup']) y += 1;
@@ -660,6 +700,86 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     }
   }
   loadHw();
+
+  // ---------- Wi-Fi (menu) ----------
+  var wS = null, wMode = 0;
+  function $(id){ return document.getElementById(id); }
+  var chs = '';
+  for (var wc = 1; wc <= 13; wc++) chs += '<option value="' + wc + '">' + wc + '</option>';
+  $('wch').innerHTML = chs;
+  function esc(t){ return String(t).replace(/[&<>"]/g, function(c){ return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function loadWifi(){
+    fetch('/wifi', { cache: 'no-store' }).then(function(r){ return r.json(); })
+      .then(function(j){ wS = j; renderWifi(true); }).catch(function(){});
+  }
+  function renderWifi(fill){
+    if (fill){
+      wMode = wS.mode;
+      $('was').value = wS.as; $('wss').value = wS.ss; $('whn').value = wS.hn;
+      $('wkeep').checked = !!wS.keep; $('wch').value = String(wS.ch);
+      $('wap').value = ''; $('wsp').value = '';
+      var st = '';
+      if (wS.apOn) st += '<div class="msg ok">Sieć robota „' + esc(wS.as) + '” · http://' + wS.apIp + ' · połączone urządzenia: ' + wS.apClients + '</div>';
+      if (wS.mode === 1) st += wS.staOk
+        ? '<div class="msg ok">Sieć domowa „' + esc(wS.ss) + '”: połączono · http://' + wS.staIp + ' · sygnał ' + wS.rssi + ' dBm</div>'
+        : '<div class="msg warn">Brak połączenia z siecią domową „' + esc(wS.ss) + '”.</div>';
+      $('wst').innerHTML = st;
+    }
+    var bs = $('wmode').querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].classList.toggle('on', +bs[i].dataset.v === wMode);
+    $('w-sta').hidden = wMode !== 1;
+    $('w-ap').hidden = wMode === 1 && !$('wkeep').checked;
+    $('whn-note').textContent = 'W sieci domowej strona będzie też pod adresem http://' + ($('whn').value || 'robot') +
+      '.local (nie każdy telefon to obsługuje – wtedy użyj adresu IP z routera).';
+  }
+  $('wmode').addEventListener('click', function(e){
+    if (e.target.dataset.v === undefined) return;
+    wMode = +e.target.dataset.v; renderWifi(false);
+  });
+  $('wkeep').addEventListener('change', function(){ renderWifi(false); });
+  $('whn').addEventListener('input', function(){ renderWifi(false); });
+  $('wscan').addEventListener('click', function(){
+    send('W scan 1');
+    $('wlist').innerHTML = '<p class="note">Szukam sieci…</p>';
+    var tries = 0;
+    (function poll(){
+      setTimeout(function(){
+        fetch('/scan', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(j){
+          if (j.busy && ++tries < 20) return poll();
+          var list = (j.list || []).filter(function(n){ return n.s; });
+          $('wlist').innerHTML = list.length ? list.map(function(n){
+            return '<button class="net" data-s="' + esc(n.s) + '">' + esc(n.s) + '<span>' + n.r + ' dBm' + (n.o ? ' · otwarta' : '') + '</span></button>';
+          }).join('') : '<p class="note">Nie znaleziono sieci.</p>';
+        }).catch(function(){ $('wlist').innerHTML = ''; });
+      }, 800);
+    })();
+  });
+  $('wlist').addEventListener('click', function(e){
+    var b = e.target.closest('.net');
+    if (!b) return;
+    $('wss').value = b.dataset.s; $('wlist').innerHTML = ''; $('wsp').focus();
+  });
+  $('wapply').addEventListener('click', function(){
+    var err = [], as = $('was').value.trim(), ap = $('wap').value, ss = $('wss').value.trim(), sp = $('wsp').value, hn = $('whn').value.trim();
+    if (!as) err.push('Podaj nazwę sieci robota.');
+    if (ap && ap.length < 8) err.push('Hasło sieci robota musi mieć co najmniej 8 znaków.');
+    if (wMode === 1 && !ss) err.push('Podaj nazwę sieci domowej.');
+    if (!/^[a-zA-Z0-9-]{1,24}$/.test(hn)) err.push('Nazwa robota: tylko litery bez polskich znaków, cyfry i myślnik.');
+    if (err.length){ $('wmsg').innerHTML = err.map(function(t){ return '<div class="msg err">' + t + '</div>'; }).join(''); return; }
+    var e = encodeURIComponent;
+    send('W mode ' + wMode); send('W keep ' + ($('wkeep').checked ? 1 : 0)); send('W ch ' + $('wch').value);
+    send('W as ' + e(as)); if (ap) send('W ap ' + e(ap));
+    send('W ss ' + e(ss));
+    if (sp || (wS && ss !== wS.ss)) send('W sp ' + e(sp));     // nowa sieć bez hasła = sieć otwarta
+    send('W hn ' + e(hn));
+    send('W apply 1');
+    var where = wMode === 1
+      ? 'Połącz telefon z siecią „' + ss + '” i otwórz http://' + hn + '.local albo adres IP robota z routera.' +
+        ($('wkeep').checked ? ' Sieć robota „' + as + '” też będzie działać (http://192.168.4.1).' : '')
+      : 'Połącz telefon z siecią „' + as + '” i otwórz http://192.168.4.1.';
+    $('wmsg').innerHTML = '<div class="msg ok">Robot uruchamia się ponownie. ' + esc(where) + '</div>';
+    stxt.textContent = 'uruchamianie ponowne…';
+  });
 
   function pushNow(){ var c = command(); send(c); last = c; lastSent = Date.now(); }
   setInterval(function(){

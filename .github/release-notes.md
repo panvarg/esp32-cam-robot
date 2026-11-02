@@ -1,5 +1,11 @@
 Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu (dwie gałki na ekranie + podgląd z kamery) oraz opcjonalnie z aparatury ExpressLRS.
 
+## Co nowego w v1.3.0
+
+- **zakładka Wi-Fi:** sieć robota (nazwa, hasło, kanał) albo sieć domowa z wyszukiwaniem sieci; opcja utrzymania sieci robota równolegle; adres http://robot.local (nazwa do zmiany)
+- awaryjny reset Wi-Fi: 3 włączenia robota z rzędu, każde krótsze niż 10 s
+- pisanie w polach menu nie steruje już robotem (WASD/F)
+
 ## Co nowego w v1.2.0
 
 - **menu ⚙ z zakładkami Obraz / Napęd / ELRS**
@@ -29,7 +35,7 @@ Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu
 
 ## Co potrafi
 
-- własna sieć Wi-Fi **`ESP32-Robot`** (hasło `robot1234`), strona sterowania pod **http://192.168.4.1**
+- domyślnie własna sieć Wi-Fi **`ESP32-Robot`** (hasło `robot1234`), strona sterowania pod **http://192.168.4.1**; w menu można przełączyć na sieć domową
 - dwie gałki jak w grach (lewa: gaz, prawa: skręt; w trybie Mecanum lewa okrągła z jazdą bokiem), regulacja mocy 20–100%, włącznik diody flash
 - podgląd z kamery z menu ustawień obrazu (rozdzielczość do 1280×720, obrót, odbicia, jasność, kontrast, balans bieli, ekspozycja, efekty), licznik FPS
 - napęd czołgowy 2WD/4WD albo koła Mecanum; piny i kanały aparatury ustawiane w menu

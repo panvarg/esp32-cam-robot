@@ -1088,8 +1088,8 @@ void loop() {
     prefs.end();
   }
   if (wifiScanReq) {
-    wifiScanReq = false;
     WiFi.scanNetworks(true);          // asynchronicznie, wynik pod /scan
+    wifiScanReq = false;              // dopiero po starcie – /scan do tego czasu odpowiada "busy"
   }
   if (wifiApply) {
     wifiSave(wifiNew);
