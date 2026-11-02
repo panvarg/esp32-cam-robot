@@ -1,5 +1,14 @@
 Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu (dwie gałki na ekranie + podgląd z kamery) oraz opcjonalnie z aparatury ExpressLRS.
 
+## Co nowego w v1.2.0
+
+- **menu ⚙ z zakładkami Obraz / Napęd / ELRS**
+- **Napęd:** czołg albo **koła Mecanum** (jazda bokiem, 4 silniki, 8 pinów), liczba silników, wybór pinów L298N z ostrzeżeniami o konfliktach, odwrócenie kierunku każdej strony lub koła, minimalna moc startowa, pin diody
+- **ELRS:** pin odbiornika, przypisanie kanałów do funkcji i podgląd 16 kanałów na żywo z LQ
+- w trybie Mecanum lewa gałka jest okrągła (przód/tył + bok), prawa obraca robota; na komputerze Q/E to jazda bokiem
+- pod gałkami widać rzeczywistą moc każdego koła, także przy sterowaniu z aparatury
+- uwaga: piny i kanały ustawione wcześniej w kodzie (`#define`) są teraz w menu; przy pierwszym starcie obowiązują domyślne (silniki 14/15/13/12, dioda 4, ELRS 2)
+
 ## Co nowego w v1.1.2
 
 - **ważna poprawka:** po wybraniu w menu 1024×768 lub HD (albo powrocie z nich) robot mógł przestać reagować na diodę i sterowanie, w tym failsafe. Restart kamery już nie blokuje sterowania, a na czas restartu (ok. 1 s) silniki stają.
@@ -21,9 +30,9 @@ Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu
 ## Co potrafi
 
 - własna sieć Wi-Fi **`ESP32-Robot`** (hasło `robot1234`), strona sterowania pod **http://192.168.4.1**
-- dwie gałki jak w grach (lewa: gaz, prawa: skręt), regulacja mocy 20–100%, włącznik diody flash
+- dwie gałki jak w grach (lewa: gaz, prawa: skręt; w trybie Mecanum lewa okrągła z jazdą bokiem), regulacja mocy 20–100%, włącznik diody flash
 - podgląd z kamery z menu ustawień obrazu (rozdzielczość do 1280×720, obrót, odbicia, jasność, kontrast, balans bieli, ekspozycja, efekty), licznik FPS
-- napęd 2WD lub 4WD (skręt czołgowy), opcjonalnie dwa L298N
+- napęd czołgowy 2WD/4WD albo koła Mecanum; piny i kanały aparatury ustawiane w menu
 - odbiornik **ELRS (CRSF)** na GPIO 2: aparatura przejmuje sterowanie po włączeniu AUX1, a po utracie zasięgu wraca telefon
 - failsafe: brak sygnału = silniki stop
 

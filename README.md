@@ -18,7 +18,8 @@ Robot sterowany z telefonu przez przeglądarkę: obraz z kamery na pełnym ekran
   - automatyczna albo ręczna ekspozycja;
   - efekty: negatyw, czarno-biały, sepia i inne.
 - Obok statusu połączenia widać aktualną liczbę klatek na sekundę (FPS).
-- Na komputerze możesz sterować klawiszami WASD lub strzałkami, a `F` włącza światło.
+- Menu ⚙ ma trzy zakładki: **Obraz**, **Napęd** (typ napędu: czołg albo Mecanum, liczba silników, piny L298N, odwrócenie kierunku, moc startowa, pin diody) i **ELRS** (pin odbiornika, przypisanie kanałów, podgląd kanałów na żywo). Konfiguracja zapisuje się w robocie. Piny i typ napędu zaczynają działać po przycisku „Zapisz i uruchom ponownie”.
+- Na komputerze możesz sterować klawiszami WASD lub strzałkami. Q/E to jazda bokiem (Mecanum), a `F` włącza światło.
 - **Failsafe:** jeśli przez 0,6 s nie przyjdzie żadna komenda (zerwane Wi-Fi, zamknięta karta), silniki się zatrzymują.
 
 Sterowanie idzie przez WebSocket (port 80), a obraz jako strumień MJPEG (port 81).
@@ -41,6 +42,8 @@ Sterowanie idzie przez WebSocket (port 80), a obraz jako strumień MJPEG (port 8
  OUT1/OUT2 ── silnik LEWY
  OUT3/OUT4 ── silnik PRAWY
 ```
+
+Tak wygląda konfiguracja domyślna. Każdy pin możesz zmienić w menu ⚙ → Napęd. Do wyboru są wolne piny ESP32-CAM: 1, 2, 3, 4, 12, 13, 14 i 15. Strona ostrzega przed konfliktami. Jeśli piny silników zostaną źle ustawione, na przykład ten sam pin dwa razy, robot uruchomi się z ustawieniami domyślnymi.
 
 Uwagi:
 
@@ -76,9 +79,28 @@ Najlepiej użyć **obu modułów L298N**, tak żeby każdy silnik miał własny 
 
 - ESP32-CAM zasilaj z wyjścia +5V **tylko jednego** modułu. Pinów +5V obu modułów nie łącz ze sobą.
 - Po podłączeniu podnieś robota i dla każdego koła sprawdź, czy przy wychyleniu analogu do przodu kręci się do przodu. Jeśli któreś kręci się odwrotnie, zamień przewody tylko tego silnika na zaciskach OUTx. Koła po jednej stronie muszą kręcić się zgodnie, inaczej będą ze sobą walczyć.
-- `INVERT_LEFT` / `INVERT_RIGHT` odwracają całą stronę naraz, czyli oba moduły.
-- Obrót w miejscu przy 4 kołach wymaga sporo siły, bo koła ślizgają się bokiem. Jeśli robot przy małym wychyleniu tylko buczy, zwiększ `MIN_DUTY` (np. do 110–130). Pomaga też zasilanie 2S Li-ion (7,4–8,4 V), a nie 4×AA.
+- W menu ⚙ → Napęd ustaw **Liczba silników: 4**. Opcja **Odwróć kierunek** odwraca całą stronę naraz, czyli oba moduły.
+- Obrót w miejscu przy 4 kołach wymaga sporo siły, bo koła ślizgają się bokiem. Jeśli robot przy małym wychyleniu tylko buczy, zwiększ w menu **Minimalną moc startową** (np. do 110–130). Pomaga też zasilanie 2S Li-ion (7,4–8,4 V), a nie 4×AA.
 - Wersja oszczędna: jeden L298N, a dwa silniki z każdej strony połączone równolegle na jednym kanale (lewe na OUT1/OUT2, prawe na OUT3/OUT4). Działa, ale moduł mocno się grzeje.
+
+## Koła Mecanum
+
+Koła Mecanum pozwalają jeździć bokiem i po skosie. Każdy z 4 silników musi mieć osobny kanał, więc potrzebne są dwa L298N i **8 pinów**. W menu ⚙ → Napęd wybierz **Mecanum** i przypisz piny każdemu kołu. Domyślnie:
+
+```
+ L298N #1 (przód)                     L298N #2 (tył)
+ IN1 ── GPIO 14  lewe przednie A      IN1 ── GPIO 2   lewe tylne A
+ IN2 ── GPIO 15  lewe przednie B      IN2 ── GPIO 4   lewe tylne B
+ IN3 ── GPIO 13  prawe przednie A     IN3 ── GPIO 1   prawe tylne A
+ IN4 ── GPIO 12  prawe przednie B     IN4 ── GPIO 3   prawe tylne B
+```
+
+Ograniczenia: ESP32-CAM ma tylko 8 wolnych pinów, więc w trybie Mecanum zajęte są wszystkie.
+- **Nie zostaje pin dla odbiornika ELRS ani dla diody.** Robot sterujesz wtedy tylko z telefonu.
+- **GPIO 1 i 3** to port programatora: Serial Monitor jest wyłączony, a przy wgrywaniu programu trzeba odłączyć przewody z tych pinów. GPIO 1 przy starcie wysyła dane, więc podłączone koło może na chwilę drgnąć.
+- **GPIO 4** steruje też diodą flash, więc dioda świeci podczas jazdy.
+
+Sterowanie Mecanum z telefonu: **lewa gałka jest okrągła** (przód/tył i jazda bokiem), a **prawa obraca robota**. Koła ustaw tak, żeby rolki górnych części kół tworzyły „X” patrząc z góry. Jeśli jazda bokiem idzie po skosie, odwróć kierunek pojedynczego koła w menu.
 
 ## Odbiornik ELRS (opcjonalnie)
 
@@ -102,8 +124,8 @@ Robota można też prowadzić aparaturą RC z odbiornikiem ExpressLRS, takim jak
 | aparatura połączona, AUX1 włączony | **aparatura** (na stronie: „Aparatura steruje”, analog na ekranie jest wyszarzony) |
 | zerwane połączenie z aparaturą | po 0,25 s sterowanie wraca do telefonu |
 
-Kanały (tryb 2, ustawienia na górze `.ino`, `RC_CH_*`):
-- **CH1** (prawy drążek lewo/prawo) – skręt
+Domyślne kanały (tryb 2). Każdy można zmienić w menu ⚙ → ELRS, gdzie jest też podgląd wszystkich 16 kanałów na żywo:
+- **CH1** (prawy drążek lewo/prawo): skręt. W trybie Mecanum to jazda bokiem, a obrót przechodzi na **CH4** (lewy drążek lewo/prawo).
 - **CH2** (prawy drążek góra/dół) – jazda przód/tył
 - **CH3** (gaz) – ograniczenie mocy, od 25% przy gazie na dole do 100% przy gazie na górze
 - **CH5 / AUX1** – przejęcie sterowania przez aparaturę. Uzbrojenie zadziała tylko wtedy, gdy drążek jazdy jest w środku.
@@ -113,7 +135,7 @@ Ważne:
 - W ustawieniach odbiornika ELRS (Lua lub WebUI) ustaw **Failsafe = No Pulses** (domyślne). W trybie „Last Position” robot po utracie zasięgu jechałby dalej.
 - Odbiornik powinien pracować w trybie CRSF/Serial (domyślny) na 420000 bodów.
 - GPIO 2 jest pinem rozruchowym. **Przy wgrywaniu programu odłącz przewód z GPIO 2**, inaczej ESP32 może nie wejść w tryb programowania. W normalnej pracy to nie przeszkadza.
-- Chcesz wyłączyć obsługę odbiornika? Ustaw `RC_ENABLED false`.
+- Pin odbiornika zmienisz w menu ⚙ → ELRS. Ustaw „brak”, jeśli nie używasz odbiornika.
 
 ## Wgrywanie (Arduino IDE)
 
@@ -130,19 +152,18 @@ Ważne:
 
 ## Konfiguracja
 
-Wszystkie ustawienia są na górze pliku `esp32_cam_robot.ino`:
+Obraz, napęd, piny i kanały aparatury ustawiasz na stronie, w menu ⚙. W pliku `esp32_cam_robot.ino` zostały tylko:
 
 | Ustawienie | Opis |
 |---|---|
 | `USE_AP_MODE` | `true`: robot tworzy własną sieć. `false`: łączy się z routerem (`STA_SSID`/`STA_PASS`), a gdy się nie uda, wraca do trybu AP |
 | `AP_SSID`, `AP_PASS` | nazwa i hasło sieci robota |
-| `INVERT_LEFT`, `INVERT_RIGHT` | odwraca kierunek koła, gdy kręci się w złą stronę |
-| `MIN_DUTY` | minimalne wypełnienie PWM, przy którym silniki ruszają (zwiększ, jeśli robot „buczy”, ale nie jedzie) |
+| `HW_DEFAULTS` | domyślne piny, napęd i kanały aparatury (używane przy pierwszym uruchomieniu i po „Przywróć domyślne”) |
 | `CAM_VFLIP`, `CAM_HMIRROR` | domyślne odbicie obrazu (potem zmienisz je w menu ⚙ na stronie) |
 | `LIGHT_DUTY` | jasność diody flash |
 | `FAILSAFE_MS` | po ilu ms bez sygnału robot staje |
 
-Jeśli robot skręca w lewo, gdy wychylasz analog w prawo, zamień miejscami przewody silnika lewego i prawego (OUT1/2 ↔ OUT3/4) albo ustaw oba `INVERT_*`.
+Jeśli robot skręca w lewo, gdy wychylasz gałkę w prawo, zamień miejscami przewody silnika lewego i prawego (OUT1/2 ↔ OUT3/4) albo zamień piny lewej i prawej strony w menu ⚙ → Napęd.
 
 **Wskazówka:** na telefonie dodaj stronę do ekranu głównego („Dodaj do ekranu początkowego”) i trzymaj telefon poziomo. Pasek adresu wtedy znika.
 

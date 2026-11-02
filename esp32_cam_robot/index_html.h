@@ -66,8 +66,26 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   .row input[type=checkbox]{width:22px;height:22px;accent-color:#3b8fe0}
   .ends{display:flex;justify-content:space-between;font-size:11px;color:#8a949c}
   .sep{border-top:1px solid rgba(255,255,255,.1)}
-  #mreset{height:38px;border-radius:8px;border:1px solid rgba(255,140,120,.5);background:transparent;color:#ff9c8a;font-size:14px}
+  #mreset,.mreset{height:38px;border-radius:8px;border:1px solid rgba(255,140,120,.5);background:transparent;color:#ff9c8a;font-size:14px}
   .note{font-size:11px;color:#8a949c;margin:0}
+  .tabs{display:flex;gap:4px;padding:8px 14px 0}
+  .tabs button{flex:1;height:34px;border-radius:8px 8px 0 0;border:1px solid rgba(255,255,255,.2);border-bottom:0;
+    background:transparent;color:#aab4bc;font-size:13px}
+  .tabs button.on{background:rgba(255,255,255,.1);color:#fff}
+  .pinrow{display:grid;grid-template-columns:1fr 96px;gap:8px;align-items:center;font-size:13px;color:#cfd6dc}
+  .msg{font-size:12px;line-height:1.4;padding:8px 10px;border-radius:8px}
+  .msg.warn{background:rgba(255,200,80,.12);color:#ffd27a}
+  .msg.err{background:rgba(255,90,80,.15);color:#ff9c8a}
+  .msg.ok{background:rgba(80,220,120,.12);color:#8fe3a8}
+  .primary{height:40px;border-radius:8px;border:0;background:#3b8fe0;color:#fff;font-size:14px;font-weight:600}
+  .primary:disabled{opacity:.4}
+  .chv{display:grid;grid-template-columns:44px 1fr 44px;gap:6px;align-items:center;font-size:11px;color:#aab4bc}
+  .chv .bar{height:8px;border-radius:4px;background:rgba(255,255,255,.1);position:relative;overflow:hidden}
+  .chv .bar i{position:absolute;left:0;top:0;bottom:0;background:#3b8fe0}
+  .chv.used{color:#fff}
+  .chv .tag{grid-column:2 / 4;font-size:10px;color:#8fc6ff;margin-top:-4px}
+  .base.r{width:calc(2 * var(--R) + var(--K) + 14px);height:calc(2 * var(--R) + var(--K) + 14px)}
+  .base.r::before,.base.r::after{content:none}
   /* dwie strefy: lewa połowa = gaz, prawa = skręt; gałka pojawia się pod palcem */
   .zone{position:fixed;top:0;bottom:0;width:50%}
   #zl{left:0} #zr{right:0}
@@ -103,7 +121,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
 <div id="top">
   <div class="btn" id="light" title="Światło (F)">&#128161;</div>
-  <div class="btn" id="gear" title="Ustawienia obrazu">&#9881;</div>
+  <div class="btn" id="gear" title="Ustawienia">&#9881;</div>
   <div class="speed">
     <button id="down">&minus;</button>
     <span id="spd">70%</span>
@@ -112,8 +130,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 </div>
 
 <div id="menu" hidden>
-  <div class="mhead">Ustawienia obrazu <button id="mclose" aria-label="Zamknij">&#10005;</button></div>
-  <div class="mbody">
+  <div class="mhead">Ustawienia <button id="mclose" aria-label="Zamknij">&#10005;</button></div>
+  <div class="tabs"><button data-tab="obraz" class="on">Obraz</button><button data-tab="naped">Napęd</button><button data-tab="elrs">ELRS</button></div>
+  <div class="mbody" id="tab-obraz">
     <div class="grp"><label>Szybki wybór</label>
       <div class="seg" id="presets"><button data-p="0">Płynnie</button><button data-p="1">Balans</button><button data-p="2">Jakość</button></div>
     </div>
@@ -164,8 +183,39 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     <button id="mreset">Przywróć domyślne</button>
     <p class="note" id="mnote">Ustawienia zapisują się w robocie i zostają po wyłączeniu.</p>
   </div>
+
+  <div class="mbody" id="tab-naped" hidden>
+    <div class="grp"><label>Typ napędu</label>
+      <div class="seg" data-h="mode"><button data-v="0">Czołg</button><button data-v="1">Mecanum</button></div>
+    </div>
+    <div class="grp"><label>Liczba silników</label>
+      <div class="seg" data-h="mot"><button data-v="2">2</button><button data-v="4">4</button></div>
+      <p class="note" id="mot-note"></p>
+    </div>
+    <div class="grp"><label>Piny L298N</label><div class="grp" id="pins"></div></div>
+    <div class="grp"><label>Odwróć kierunek</label><div class="grp" id="invs"></div></div>
+    <div class="grp"><label for="md">Minimalna moc startowa <span class="val" id="mdv"></span></label>
+      <input type="range" id="md" min="0" max="200" step="5">
+      <div class="ends"><span>0</span><span>zwiększ, jeśli silniki buczą, ale nie ruszają</span></div>
+    </div>
+    <div class="pinrow"><label for="lp">Pin diody flash</label><select id="lp" data-pin="lp"></select></div>
+    <div class="grp" id="hwmsg"></div>
+    <button class="primary hwreboot">Zapisz i uruchom ponownie</button>
+    <p class="note">Piny i typ napędu zaczną działać po ponownym uruchomieniu robota. Odwrócenie kierunku i moc startowa działają od razu.</p>
+    <button id="hwreset" class="mreset">Przywróć domyślne</button>
+  </div>
+
+  <div class="mbody" id="tab-elrs" hidden>
+    <div class="pinrow"><label for="rp">Pin odbiornika (TX odbiornika)</label><select id="rp" data-pin="rp"></select></div>
+    <div class="msg" id="rcst">…</div>
+    <div class="grp"><label>Przypisanie kanałów</label><div class="grp" id="chmap"></div></div>
+    <div class="grp"><label>Podgląd kanałów na żywo</label><div class="grp" id="chview"></div></div>
+    <div class="grp" id="rcmsg"></div>
+    <button class="primary hwreboot">Zapisz i uruchom ponownie</button>
+    <p class="note">Przypisanie kanałów działa od razu, zmiana pinu po ponownym uruchomieniu.</p>
+  </div>
 </div>
-<div id="hint" class="hud">WASD / strzałki · F światło</div>
+<div id="hint" class="hud">WASD / strzałki · Q/E bokiem (Mecanum) · F światło</div>
 
 <script>
 (function(){
@@ -185,10 +235,12 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   var ws = null, dot = document.getElementById('dot'), stxt = document.getElementById('stxt');
   function connect(){
     ws = new WebSocket('ws://' + host + '/ws');
-    ws.onopen = function(){ dot.className = 'ok'; stxt.textContent = 'połączono'; loadSettings(); };
+    ws.onopen = function(){ dot.className = 'ok'; stxt.textContent = 'połączono'; loadSettings(); loadHw(); };
     ws.onmessage = function(e){
       var p = String(e.data).split(' ');
+      if (p[0] === 'V') return showChannels(p);
       if (p[0] !== 'R') return;
+      if (p.length >= 9) showWheels([+p[5], +p[6], +p[7], +p[8]]);
       showRc(+p[1]);
       var l = p[2] === '1';
       if (l !== light){ light = l; lightEl.classList.toggle('on', light); }
@@ -224,6 +276,14 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   var camS = {};
   var PRESETS = [ { fs: 0, q: 14 }, { fs: 2, q: 12 }, { fs: 3, q: 10 } ];   // Płynnie / Balans / Jakość
   tap('gear', function(){ menu.hidden = !menu.hidden; });
+  var tab = 'obraz';
+  var tabBtns = menu.querySelectorAll('.tabs button');
+  for (var ti = 0; ti < tabBtns.length; ti++) tabBtns[ti].addEventListener('click', function(){
+    tab = this.dataset.tab;
+    for (var j = 0; j < tabBtns.length; j++) tabBtns[j].classList.toggle('on', tabBtns[j] === this);
+    ['obraz', 'naped', 'elrs'].forEach(function(t){ document.getElementById('tab-' + t).hidden = t !== tab; });
+    if (tab !== 'obraz') loadHw();
+  });
   document.getElementById('mclose').addEventListener('click', function(){ menu.hidden = true; });
 
   function loadSettings(){
@@ -334,9 +394,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   layoutSticks();
   window.addEventListener('resize', layoutSticks);
 
+  // axis: 'y' – tylko góra/dół, 'x' – tylko lewo/prawo, 'xy' – okrągła (Mecanum: jazda + bok)
   function makeStick(zone, axis){
     var base = zone.querySelector('.base'), knob = zone.querySelector('.knob');
-    var st = { id: null, c: 0, v: 0, edge: false };
+    var st = { id: null, cx: 0, cy: 0, vx: 0, vy: 0, edge: false };
     function home(){
       var r = zone.getBoundingClientRect();
       base.style.left = (r.width / 2) + 'px';
@@ -344,18 +405,21 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       base.style.opacity = '.55';
     }
     function move(e){
-      var d = (axis === 'y' ? e.clientY : e.clientX) - st.c;
-      d = Math.max(-RADIUS, Math.min(RADIUS, d));
-      knob.style.transform = axis === 'y' ? 'translateY(' + d + 'px)' : 'translateX(' + d + 'px)';
-      var n = Math.abs(d) / RADIUS;
-      var v = n < DEADZONE ? 0 : (n - DEADZONE) / (1 - DEADZONE);   // przeskalowanie poza martwą strefą
-      st.v = (axis === 'y' ? -1 : 1) * (d < 0 ? -v : v);          // gaz: w górę = do przodu
+      var dx = axis === 'y' ? 0 : e.clientX - st.cx;
+      var dy = axis === 'x' ? 0 : e.clientY - st.cy;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d > RADIUS){ dx = dx / d * RADIUS; dy = dy / d * RADIUS; d = RADIUS; }
+      knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      var n = d / RADIUS;
+      var k = n < DEADZONE ? 0 : (n - DEADZONE) / (1 - DEADZONE) / n;   // przeskalowanie poza martwą strefą
+      st.vx = dx / RADIUS * k;
+      st.vy = -dy / RADIUS * k;                                        // w górę = do przodu
       if (navigator.vibrate && n >= 1 && !st.edge) navigator.vibrate(8);
       st.edge = n >= 1;
     }
     function end(e){
       if (e.pointerId !== st.id) return;
-      st.id = null; st.v = 0; st.edge = false;
+      st.id = null; st.vx = 0; st.vy = 0; st.edge = false;
       knob.style.transform = '';
       home();
       pushNow();
@@ -368,9 +432,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       var r = zone.getBoundingClientRect();
       // środek toru pod palcem, ale przesunięty tak, żeby cały tor mieścił się na ekranie
       var m = RADIUS + KNOB / 2 + 10, cx = e.clientX, cy = e.clientY;
-      if (axis === 'y') cy = Math.max(r.top + m, Math.min(window.innerHeight - m, cy));
-      else cx = Math.max(r.left + m, Math.min(r.right - m, cx));
-      st.c = axis === 'y' ? cy : cx;                 // gałka pojawia się pod palcem
+      if (axis !== 'x') cy = Math.max(r.top + m, Math.min(window.innerHeight - m, cy));
+      if (axis !== 'y') cx = Math.max(r.left + m, Math.min(r.right - m, cx));
+      st.cx = cx; st.cy = cy;                        // gałka pojawia się pod palcem
       base.style.left = (cx - r.left) + 'px';
       base.style.top = (cy - r.top) + 'px';
       base.style.opacity = '1';
@@ -380,6 +444,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     zone.addEventListener('pointerup', end);
     zone.addEventListener('pointercancel', end);
     window.addEventListener('resize', function(){ if (st.id === null) home(); });
+    st.setAxis = function(a){
+      axis = a;
+      base.className = 'base ' + (a === 'xy' ? 'r' : a === 'y' ? 'v' : 'h');
+    };
     home();
     return st;
   }
@@ -400,23 +468,199 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     if (keys['s'] || keys['arrowdown']) y -= 1;
     if (keys['d'] || keys['arrowright']) x += 1;
     if (keys['a'] || keys['arrowleft']) x -= 1;
-    return { x: x, y: y };
+    var sd = (keys['e'] ? 1 : 0) - (keys['q'] ? 1 : 0);   // Mecanum: Q/E – jazda bokiem
+    return { x: x, y: y, s: sd };
   }
 
   // ---------- wysyłanie ----------
   var last = '', lastSent = 0, readout = document.getElementById('readout');
   function command(){
     var k = keyAxis();
-    var x = steer.id !== null ? steer.v : k.x;
-    var y = gas.id !== null ? gas.v : k.y;
+    var x = steer.id !== null ? steer.vx : k.x;
+    var y = gas.id !== null ? gas.vy : k.y;
+    var sd = mecanum ? (gas.id !== null ? gas.vx : k.s) : 0;
     var s = speed / 100;
-    var X = Math.round(x * TURN * s * 100), Y = Math.round(y * s * 100);
-    // podgląd mocy kół (to samo miksowanie co w ESP32)
-    var l = Y + X, r = Y - X, m = Math.max(Math.abs(l), Math.abs(r));
-    if (m > 100){ l = Math.round(l * 100 / m); r = Math.round(r * 100 / m); }
-    readout.textContent = 'L ' + l + ' · P ' + r;
-    return 'M ' + X + ' ' + Y;
+    var X = Math.round(x * TURN * s * 100), Y = Math.round(y * s * 100), S = Math.round(sd * s * 100);
+    return mecanum ? 'M ' + X + ' ' + Y + ' ' + S : 'M ' + X + ' ' + Y;
   }
+  // moc kół podawana przez robota (działa też przy sterowaniu z aparatury)
+  function showWheels(w){
+    readout.textContent = mecanum
+      ? 'LP ' + w[0] + ' · PP ' + w[1] + ' · LT ' + w[2] + ' · PT ' + w[3]
+      : 'L ' + w[0] + ' · P ' + w[1];
+  }
+  // ---------- napęd i ELRS (menu) ----------
+  var mecanum = false, hwS = null;
+  var FREE_PINS = [1, 2, 3, 4, 12, 13, 14, 15];
+  var PIN_LABELS = {
+    tank: ['Lewa strona – IN1', 'Lewa strona – IN2', 'Prawa strona – IN3', 'Prawa strona – IN4'],
+    mec: ['Lewe przednie – A', 'Lewe przednie – B', 'Prawe przednie – A', 'Prawe przednie – B',
+          'Lewe tylne – A', 'Lewe tylne – B', 'Prawe tylne – A', 'Prawe tylne – B']
+  };
+  var INV_LABELS = { tank: ['Lewa strona', 'Prawa strona'], mec: ['Lewe przednie', 'Prawe przednie', 'Lewe tylne', 'Prawe tylne'] };
+  var CH_FUNCS = ['Skręt / obrót', 'Jazda przód/tył', 'Jazda bokiem (Mecanum)', 'Moc (gaz)', 'Przejęcie sterowania (uzbrojenie)', 'Światło'];
+
+  function loadHw(){
+    fetch('/hw', { cache: 'no-store' }).then(function(r){ return r.json(); })
+      .then(function(j){ hwS = j; applyMode(); renderHw(); }).catch(function(){});
+  }
+  // tryb gałek i przycisk światła zależą od konfiguracji aktywnej od startu robota
+  function applyMode(){
+    mecanum = hwS.bootMode === 1;
+    gas.setAxis(mecanum ? 'xy' : 'y');
+    lightEl.style.display = hwS.lightOk ? '' : 'none';
+  }
+  var hwTimer = null;
+  function setHw(k, v){
+    send('H ' + k + ' ' + v);
+    clearTimeout(hwTimer);
+    hwTimer = setTimeout(loadHw, 400);   // odśwież stan (np. czy potrzebny restart)
+  }
+  function pinOptions(sel, val, allowNone){
+    var h = allowNone ? '<option value="-1">brak</option>' : '';
+    FREE_PINS.forEach(function(p){ h += '<option value="' + p + '">GPIO ' + p + '</option>'; });
+    sel.innerHTML = h;
+    sel.value = String(val);
+  }
+  function hwMessages(){
+    var err = [], warn = [], n = hwS.mode === 1 ? 8 : 4, mp = hwS.p.slice(0, n);
+    mp.forEach(function(p, i){ if (mp.indexOf(p) !== i) err.push('Pin GPIO ' + p + ' jest użyty dla dwóch wejść.'); });
+    if (mp.indexOf(-1) >= 0) err.push('Każde wejście L298N musi mieć wybrany pin.');
+    if (hwS.lp >= 0 && mp.indexOf(hwS.lp) >= 0) warn.push('Dioda będzie wyłączona: pin GPIO ' + hwS.lp + ' zajmują silniki.');
+    if (hwS.rp >= 0 && mp.indexOf(hwS.rp) >= 0) warn.push('Odbiornik ELRS będzie wyłączony: pin GPIO ' + hwS.rp + ' zajmują silniki.');
+    if (hwS.rp >= 0 && hwS.rp === hwS.lp) warn.push('Dioda i odbiornik mają ten sam pin – odbiornik będzie wyłączony.');
+    var all = mp.concat([hwS.lp, hwS.rp]);
+    if (all.indexOf(1) >= 0 || all.indexOf(3) >= 0)
+      warn.push('Piny 1 i 3 to port programatora: Serial Monitor zostanie wyłączony, a przy wgrywaniu programu odłącz przewody z tych pinów.');
+    if (mp.indexOf(1) >= 0) warn.push('GPIO 1 przy starcie wysyła dane – podłączony silnik może na chwilę drgnąć.');
+    if (mp.indexOf(4) >= 0) warn.push('GPIO 4 steruje też diodą flash – będzie świecić podczas jazdy.');
+    if (all.indexOf(2) >= 0) warn.push('GPIO 2: przy wgrywaniu programu odłącz od niego przewód.');
+    if (all.indexOf(12) >= 0) warn.push('GPIO 12 musi mieć stan niski przy starcie – jeśli robot nie startuje, dodaj rezystor 10 kΩ do GND.');
+    if (hwS.mode === 1) warn.push('Mecanum potrzebuje 8 pinów, czyli wszystkich wolnych – nie zostaje pin dla odbiornika ELRS.');
+    return { err: err, warn: warn };
+  }
+  function msgHtml(m){
+    var h = '';
+    m.err.forEach(function(t){ h += '<div class="msg err">' + t + '</div>'; });
+    m.warn.forEach(function(t){ h += '<div class="msg warn">' + t + '</div>'; });
+    if (hwS.pending && !m.err.length) h += '<div class="msg ok">Zmiany zapisane – uruchom robota ponownie, żeby zaczęły działać.</div>';
+    return h;
+  }
+  function renderHw(){
+    if (!hwS) return;
+    var mec = hwS.mode === 1, key = mec ? 'mec' : 'tank';
+    var segs = menu.querySelectorAll('[data-h]');
+    for (var i = 0; i < segs.length; i++){
+      var v = hwS[segs[i].dataset.h], bs = segs[i].querySelectorAll('button');
+      for (var j = 0; j < bs.length; j++){
+        bs[j].classList.toggle('on', +bs[j].dataset.v === (segs[i].dataset.h === 'mot' && mec ? 4 : v));
+        bs[j].disabled = segs[i].dataset.h === 'mot' && mec;
+      }
+    }
+    document.getElementById('mot-note').textContent = mec ? 'Mecanum: 4 silniki, każdy na osobnym kanale (dwa L298N, 8 pinów).'
+      : hwS.mot === 4 ? '4 silniki: dwa L298N, wejścia IN obu modułów połączone równolegle (te same 4 piny).'
+      : '2 silniki: jeden L298N.';
+    var ph = '';
+    PIN_LABELS[key].forEach(function(l, i){ ph += '<div class="pinrow"><span>' + l + '</span><select data-pin="p' + i + '"></select></div>'; });
+    var pins = document.getElementById('pins');
+    if (pins.dataset.key !== key){ pins.innerHTML = ph; pins.dataset.key = key; }
+    var sels = pins.querySelectorAll('select');
+    for (var k = 0; k < sels.length; k++) pinOptions(sels[k], hwS.p[k], false);
+    pinOptions(document.getElementById('lp'), hwS.lp, true);
+    pinOptions(document.getElementById('rp'), hwS.rp, true);
+    var ih = '';
+    INV_LABELS[key].forEach(function(l, i){
+      ih += '<div class="row"><label for="inv' + i + '">' + l + '</label><input type="checkbox" id="inv' + i + '" data-inv="' + i + '"' + (hwS.inv[i] ? ' checked' : '') + '></div>';
+    });
+    document.getElementById('invs').innerHTML = ih;
+    document.getElementById('md').value = hwS.md;
+    document.getElementById('mdv').textContent = hwS.md;
+    var m = hwMessages(), html = msgHtml(m);
+    document.getElementById('hwmsg').innerHTML = html;
+    document.getElementById('rcmsg').innerHTML = html;
+    var rb = menu.querySelectorAll('.hwreboot');
+    for (var b = 0; b < rb.length; b++) rb[b].disabled = !hwS.pending || m.err.length > 0;
+    // przypisanie kanałów
+    var ch = '';
+    CH_FUNCS.forEach(function(f, i){
+      if (i === 2 && !mec) return;
+      ch += '<div class="pinrow"><span>' + f + '</span><select data-ch="' + i + '"><option value="0">brak</option>';
+      for (var c = 1; c <= 16; c++) ch += '<option value="' + c + '">CH' + c + (c >= 5 && c <= 12 ? ' (AUX' + (c - 4) + ')' : '') + '</option>';
+      ch += '</select></div>';
+    });
+    var chmap = document.getElementById('chmap');
+    chmap.innerHTML = ch;
+    var cs = chmap.querySelectorAll('select');
+    for (var q = 0; q < cs.length; q++) cs[q].value = String(hwS.c[+cs[q].dataset.ch]);
+    if (!document.getElementById('chview').children.length){
+      var vh = '';
+      for (var c2 = 1; c2 <= 16; c2++) vh += '<div class="chv" id="chv' + c2 + '"><span>CH' + c2 + '</span><span class="bar"><i></i></span><span class="us">–</span></div>';
+      document.getElementById('chview').innerHTML = vh;
+    }
+  }
+  // zmiany w zakładkach Napęd / ELRS
+  menu.addEventListener('change', function(e){
+    var t = e.target;
+    if (t.dataset.pin){
+      var v = +t.value;
+      if (t.dataset.pin === 'lp' || t.dataset.pin === 'rp') hwS[t.dataset.pin] = v; else hwS.p[+t.dataset.pin.slice(1)] = v;
+      setHw(t.dataset.pin, v); renderHw();
+    } else if (t.dataset.inv !== undefined){
+      hwS.inv[+t.dataset.inv] = t.checked ? 1 : 0;
+      setHw('inv' + t.dataset.inv, t.checked ? 1 : 0);
+    } else if (t.dataset.ch !== undefined){
+      hwS.c[+t.dataset.ch] = +t.value;
+      setHw('c' + t.dataset.ch, +t.value);
+    } else if (t.id === 'md'){
+      hwS.md = +t.value;
+      setHw('md', hwS.md);
+    }
+  });
+  document.getElementById('md').addEventListener('input', function(){ document.getElementById('mdv').textContent = this.value; });
+  menu.addEventListener('click', function(e){
+    var seg = e.target.parentNode && e.target.parentNode.dataset ? e.target.parentNode.dataset.h : null;
+    if (seg && e.target.dataset.v !== undefined && !e.target.disabled){
+      var v = +e.target.dataset.v;
+      if (seg === 'mode' && v !== hwS.mode){
+        // typowe kanały: czołg – skręt na CH1; Mecanum – obrót na CH4 (lewy drążek), bok na CH1
+        if (v === 1 && hwS.c[0] === 1 && hwS.c[2] === 4){ hwS.c[0] = 4; hwS.c[2] = 1; setHw('c0', 4); setHw('c2', 1); }
+        if (v === 0 && hwS.c[0] === 4 && hwS.c[2] === 1){ hwS.c[0] = 1; hwS.c[2] = 4; setHw('c0', 1); setHw('c2', 4); }
+      }
+      hwS[seg] = v;
+      setHw(seg, v);
+      renderHw();
+    }
+    if (e.target.classList.contains('hwreboot')){
+      send('H reboot 1');
+      stxt.textContent = 'uruchamianie ponowne…';
+      menu.hidden = true;
+    }
+  });
+  document.getElementById('hwreset').addEventListener('click', function(){ setHw('reset', 1); });
+
+  // podgląd kanałów aparatury: "V aktywny połączona LQ ch1..ch16" (us)
+  setInterval(function(){ if (!menu.hidden && tab === 'elrs') send('V'); }, 250);
+  function showChannels(p){
+    var active = p[1] === '1', conn = p[2] === '1', rcst = document.getElementById('rcst');
+    rcst.className = 'msg ' + (conn ? 'ok' : active ? 'warn' : 'err');
+    rcst.textContent = !active ? 'Odbiornik wyłączony – brak pinu albo pin zajęty.'
+      : conn ? 'Aparatura połączona · LQ ' + p[3] + '%' : 'Brak sygnału z aparatury.';
+    var used = {};
+    if (hwS) hwS.c.forEach(function(c, i){ if (c && (i !== 2 || hwS.mode === 1)) used[c] = (used[c] ? used[c] + ', ' : '') + CH_FUNCS[i]; });
+    for (var c = 1; c <= 16; c++){
+      var row = document.getElementById('chv' + c);
+      if (!row) return;
+      var us = +p[3 + c] || 0;
+      row.querySelector('i').style.width = us ? Math.max(0, Math.min(100, (us - 988) / 10.24)) + '%' : '0';
+      row.querySelector('.us').textContent = us || '–';
+      row.classList.toggle('used', !!used[c]);
+      var tag = row.querySelector('.tag');
+      if (used[c] && !tag){ tag = document.createElement('span'); tag.className = 'tag'; row.appendChild(tag); }
+      if (tag){ tag.textContent = used[c] || ''; tag.hidden = !used[c]; }
+    }
+  }
+  loadHw();
+
   function pushNow(){ var c = command(); send(c); last = c; lastSent = Date.now(); }
   setInterval(function(){
     if (document.hidden) return;      // karta w tle -> brak sygnału -> failsafe zatrzyma robota

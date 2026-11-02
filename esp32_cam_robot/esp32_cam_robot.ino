@@ -105,8 +105,6 @@ static bool rcActive = false;         // jw. dla odbiornika
 static const uint8_t MOTOR_CH[8] = { 4, 5, 6, 7, 10, 11, 12, 13 };
 #define CH_LIGHT 2
 
-static volatile int targetX// ============================================================
-
 static volatile int targetX = 0;            // -100..100 (skręt / obrót)
 static volatile int targetY = 0;            // -100..100 (przód/tył)
 static volatile int targetS = 0;            // -100..100 (jazda bokiem, tylko Mecanum)
@@ -715,8 +713,8 @@ static esp_err_t streamHandler(httpd_req_t *req) {
     esp_camera_fb_return(fb);
     xSemaphoreGive(camMutex);
     if (res != ESP_OK) break;         // klient się rozłączył
-    frameCount++;
-    frameBytes += len;
+    frameCount = frameCount + 1;
+    frameBytes = frameBytes + len;
   }
   return res;
 }
