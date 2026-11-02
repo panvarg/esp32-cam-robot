@@ -1,7 +1,7 @@
 /*
  * ESP32-CAM + L298N – robot zdalnie sterowany z telefonu.
  *
- *  - ESP32 tworzy własną sieć Wi-Fi (lub łączy się z domową – patrz USE_AP_MODE)
+ *  - ESP32 tworzy własną sieć Wi-Fi lub łączy się z domową (menu ⚙ → Wi-Fi)
  *  - strona www z wirtualnym analogiem (joystick jak w grach) + podgląd z kamery
  *  - sterowanie przez WebSocket (niskie opóźnienia), obraz MJPEG na porcie 81
  *  - failsafe: silniki stają, gdy przez FAILSAFE_MS nie przyjdzie żadna komenda
@@ -16,6 +16,7 @@
 
 #include <WiFi.h>
 #include <Preferences.h>
+#include <ESPmDNS.h>
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -28,15 +29,11 @@
 
 // ======================= KONFIGURACJA =======================
 
-// true  -> robot tworzy własną sieć (telefon łączy się z nią, adres 192.168.4.1)
-// false -> robot łączy się z Twoim routerem (adres sprawdzisz w Serial Monitorze)
-#define USE_AP_MODE true
-
-const char *AP_SSID = "ESP32-Robot";
-const char *AP_PASS = "robot1234";        // min. 8 znaków
-
-const char *STA_SSID = "TwojaSiec";
-const char *STA_PASS = "TwojeHaslo";
+// Wi-Fi ustawiasz na stronie (⚙ → Wi-Fi). Poniżej wartości domyślne – obowiązują przy
+// pierwszym starcie i po awaryjnym resecie (3 włączenia robota, każde krótsze niż 10 s).
+#define DEF_AP_SSID   "ESP32-Robot"
+#define DEF_AP_PASS   "robot1234"        // min. 8 znaków
+#define DEF_HOSTNAME  "robot"            // adres http://robot.local w sieci domowej
 
 // Napęd, piny L298N i odbiornik ELRS ustawiasz na stronie: ⚙ → Napęd / ELRS.
 // Konfiguracja jest zapisywana w pamięci ESP; domyślne wartości są w HW_DEFAULTS niżej.
@@ -555,7 +552,13 @@ static void rcUpdate() {
 // "C k v"  – ustawienie obrazu, np. "C br 1" (nazwy w struct CamSettings)
 // "H k v"  – napęd / piny / kanały aparatury, np. "H p0 14" (patrz hwSet)
 // "V"      – podgląd kanałów aparatury (odpowiedź "V ...")
+// "W k v"  – Wi-Fi (wartość zakodowana jak w URL), np. "W ss Moja%20siec", "W apply 1"
 // "P"      – ping (podtrzymanie failsafe)
+
+// zdefiniowane niżej, w części Wi-Fi
+static void wifiSet(const char *key, const char *val);
+static esp_err_t wifiHandler(httpd_req_t *req);
+static esp_err_t scanHandler(httpd_req_t *req);
 
 static void handleCommand(const char *cmd) {
   int a = 0, b = 0, c = 0;
@@ -580,6 +583,12 @@ static void handleCommand(const char *cmd) {
     case 'H': {
       char key[8];
       if (sscanf(cmd + 1, "%7s %d", key, &a) == 2) hwSet(key, a);
+      break;
+    }
+    case 'W': {
+      char key[8], val[192];
+      val[0] = 0;
+      if (sscanf(cmd + 1, "%7s %191s", key, val) >= 1) wifiSet(key, val);
       break;
     }
     default:
@@ -640,7 +649,7 @@ static esp_err_t wsHandler(httpd_req_t *req) {
   if (ret != ESP_OK) return ret;
   if (frame.len == 0) return ESP_OK;
 
-  uint8_t buf[64];
+  uint8_t buf[200];                   // hasła Wi-Fi bywają długie
   if (frame.len >= sizeof(buf)) return ESP_FAIL;
   frame.payload = buf;
   ret = httpd_ws_recv_frame(req, &frame, frame.len);
@@ -754,6 +763,10 @@ static void startServers() {
     httpd_register_uri_handler(webHttpd, &indexUri);
     httpd_register_uri_handler(webHttpd, &settingsUri);
     httpd_register_uri_handler(webHttpd, &hwUri);
+    httpd_uri_t wifiUri = { "/wifi", HTTP_GET, wifiHandler, NULL };
+    httpd_uri_t scanUri = { "/scan", HTTP_GET, scanHandler, NULL };
+    httpd_register_uri_handler(webHttpd, &wifiUri);
+    httpd_register_uri_handler(webHttpd, &scanUri);
     httpd_register_uri_handler(webHttpd, &wsUri);
   }
 
@@ -826,33 +839,179 @@ static bool cameraStart() {
 
 // ---------- Wi-Fi ----------
 
-static void wifiInit() {
-  WiFi.setSleep(false);               // mniejsze opóźnienia sterowania
+struct WifiSettings {
+  uint8_t mode;     // 0 – własna sieć robota (AP), 1 – sieć domowa (STA)
+  uint8_t apKeep;   // w trybie sieci domowej zostaw też własną sieć robota
+  uint8_t apCh;     // kanał własnej sieci 1..13
+  String apSsid, apPass, staSsid, staPass, host;
+};
+static WifiSettings wifiCfg, wifiNew;      // aktywne / edytowane w menu
+static volatile bool wifiApply = false;
+static volatile bool wifiScanReq = false;
+static bool wifiStaOk = false;
 
-  if (!USE_AP_MODE) {
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(STA_SSID, STA_PASS);
-    Serial.print("Laczenie z siecia");
+static void wifiDefaults(WifiSettings &w) {
+  w.mode = 0; w.apKeep = 1; w.apCh = 1;
+  w.apSsid = DEF_AP_SSID; w.apPass = DEF_AP_PASS;
+  w.staSsid = ""; w.staPass = ""; w.host = DEF_HOSTNAME;
+}
+
+static void wifiLoad() {
+  wifiDefaults(wifiCfg);
+  prefs.begin("wifi", true);
+  if (prefs.isKey("mode")) {
+    wifiCfg.mode = prefs.getUChar("mode", 0);
+    wifiCfg.apKeep = prefs.getUChar("keep", 1);
+    wifiCfg.apCh = prefs.getUChar("ch", 1);
+    wifiCfg.apSsid = prefs.getString("as", DEF_AP_SSID);
+    wifiCfg.apPass = prefs.getString("ap", DEF_AP_PASS);
+    wifiCfg.staSsid = prefs.getString("ss", "");
+    wifiCfg.staPass = prefs.getString("sp", "");
+    wifiCfg.host = prefs.getString("hn", DEF_HOSTNAME);
+  }
+  prefs.end();
+  wifiNew = wifiCfg;
+}
+
+static void wifiSave(const WifiSettings &w) {
+  prefs.begin("wifi", false);
+  prefs.putUChar("mode", w.mode);
+  prefs.putUChar("keep", w.apKeep);
+  prefs.putUChar("ch", w.apCh);
+  prefs.putString("as", w.apSsid);
+  prefs.putString("ap", w.apPass);
+  prefs.putString("ss", w.staSsid);
+  prefs.putString("sp", w.staPass);
+  prefs.putString("hn", w.host);
+  prefs.end();
+}
+
+// Awaryjny reset Wi-Fi: 3 starty z rzędu, każdy krótszy niż 10 s
+static void wifiBootCounter() {
+  prefs.begin("boot", false);
+  uint8_t n = prefs.getUChar("n", 0) + 1;
+  prefs.putUChar("n", n >= 3 ? 0 : n);
+  prefs.end();
+  if (n >= 3) {
+    prefs.begin("wifi", false);
+    prefs.clear();
+    prefs.end();
+    Serial.println("Awaryjny reset Wi-Fi - ustawienia domyslne");
+  }
+}
+
+static void wifiStartAp() {
+  const char *pass = wifiCfg.apPass.length() >= 8 ? wifiCfg.apPass.c_str() : NULL;   // krótsze = sieć otwarta
+  WiFi.softAP(wifiCfg.apSsid.c_str(), pass, wifiCfg.apCh);
+  Serial.printf("Siec robota: %s, otworz http://%s\n", wifiCfg.apSsid.c_str(), WiFi.softAPIP().toString().c_str());
+}
+
+static void wifiInit() {
+  WiFi.persistent(false);
+  WiFi.setHostname(wifiCfg.host.c_str());
+  bool sta = wifiCfg.mode == 1 && wifiCfg.staSsid.length() > 0;
+
+  if (sta) {
+    WiFi.mode(wifiCfg.apKeep ? WIFI_AP_STA : WIFI_STA);
+    if (wifiCfg.apKeep) wifiStartAp();
+    WiFi.begin(wifiCfg.staSsid.c_str(), wifiCfg.staPass.c_str());
+    Serial.printf("Laczenie z siecia %s", wifiCfg.staSsid.c_str());
     unsigned long start = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
       delay(300);
       Serial.print(".");
     }
     Serial.println();
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.print("Otworz w przegladarce: http://");
-      Serial.println(WiFi.localIP());
-      return;
+    wifiStaOk = WiFi.status() == WL_CONNECTED;
+    if (wifiStaOk) {
+      Serial.printf("Polaczono, otworz http://%s albo http://%s.local\n",
+                    WiFi.localIP().toString().c_str(), wifiCfg.host.c_str());
+    } else if (!wifiCfg.apKeep) {
+      Serial.println("Brak polaczenia - uruchamiam wlasna siec robota");
+      WiFi.mode(WIFI_AP);
+      wifiStartAp();
     }
-    Serial.println("Brak polaczenia - przelaczam na tryb AP");
+  } else {
+    WiFi.mode(WIFI_AP);
+    wifiStartAp();
   }
+  WiFi.setSleep(false);               // mniejsze opóźnienia sterowania
+  if (MDNS.begin(wifiCfg.host.c_str())) MDNS.addService("http", "tcp", 80);
+}
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
-  WiFi.setSleep(false);
-  Serial.printf("Siec: %s  haslo: %s\n", AP_SSID, AP_PASS);
-  Serial.print("Otworz w przegladarce: http://");
-  Serial.println(WiFi.softAPIP());
+// Zmiana z menu Wi-Fi: "W k wartość" (wartość zakodowana jak w URL). Działa po "W apply 1".
+static String urlDecode(const char *s) {
+  String out;
+  while (*s) {
+    if (*s == '%' && isxdigit((unsigned char)s[1]) && isxdigit((unsigned char)s[2])) {
+      char hex[3] = { s[1], s[2], 0 };
+      out += (char)strtol(hex, NULL, 16);
+      s += 3;
+    } else {
+      out += *s++;
+    }
+  }
+  return out;
+}
+
+static void wifiSet(const char *key, const char *val) {
+  String v = urlDecode(val);
+  int n = v.toInt();
+  if      (!strcmp(key, "mode")) wifiNew.mode = n ? 1 : 0;
+  else if (!strcmp(key, "keep")) wifiNew.apKeep = n ? 1 : 0;
+  else if (!strcmp(key, "ch"))   wifiNew.apCh = constrain(n, 1, 13);
+  else if (!strcmp(key, "as"))   { if (v.length() >= 1 && v.length() <= 32) wifiNew.apSsid = v; }
+  else if (!strcmp(key, "ap"))   { if (v.length() >= 8 && v.length() <= 63) wifiNew.apPass = v; }
+  else if (!strcmp(key, "ss"))   { if (v.length() <= 32) wifiNew.staSsid = v; }
+  else if (!strcmp(key, "sp"))   { if (v.length() <= 63) wifiNew.staPass = v; }
+  else if (!strcmp(key, "hn"))   { if (v.length() >= 1 && v.length() <= 24) wifiNew.host = v; }
+  else if (!strcmp(key, "scan")) wifiScanReq = true;
+  else if (!strcmp(key, "apply")) wifiApply = true;
+  else if (!strcmp(key, "reset")) { wifiDefaults(wifiNew); wifiApply = true; }
+}
+
+static String jsonStr(const String &s) {
+  String o = "\"";
+  for (unsigned i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') { o += '\\'; o += c; }
+    else if ((uint8_t)c < 0x20) o += ' ';
+    else o += c;
+  }
+  return o + "\"";
+}
+
+// Ustawienia Wi-Fi i stan połączenia (hasła nie są wysyłane)
+static esp_err_t wifiHandler(httpd_req_t *req) {
+  const WifiSettings &w = wifiCfg;
+  String j = "{\"mode\":" + String(w.mode) + ",\"keep\":" + String(w.apKeep) + ",\"ch\":" + String(w.apCh) +
+             ",\"as\":" + jsonStr(w.apSsid) + ",\"ss\":" + jsonStr(w.staSsid) + ",\"hn\":" + jsonStr(w.host) +
+             ",\"apOn\":" + String((WiFi.getMode() & WIFI_AP) ? 1 : 0) +
+             ",\"apIp\":\"" + WiFi.softAPIP().toString() + "\",\"apClients\":" + String(WiFi.softAPgetStationNum()) +
+             ",\"staOk\":" + String(WiFi.status() == WL_CONNECTED ? 1 : 0) +
+             ",\"staIp\":\"" + WiFi.localIP().toString() + "\",\"rssi\":" + String(WiFi.RSSI()) + "}";
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, j.c_str(), j.length());
+}
+
+// Wynik skanowania sieci: {"busy":1} albo {"list":[{"s":"nazwa","r":-60,"o":0}, ...]}
+static esp_err_t scanHandler(httpd_req_t *req) {
+  int n = WiFi.scanComplete();
+  String j;
+  if (n == WIFI_SCAN_RUNNING || wifiScanReq) j = "{\"busy\":1}";
+  else {
+    j = "{\"list\":[";
+    for (int i = 0; i < n && i < 20; i++) {
+      if (i) j += ",";
+      j += "{\"s\":" + jsonStr(WiFi.SSID(i)) + ",\"r\":" + String(WiFi.RSSI(i)) +
+           ",\"o\":" + String(WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? 1 : 0) + "}";
+    }
+    j += "]}";
+  }
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, j.c_str(), j.length());
 }
 
 // ============================================================
@@ -885,6 +1044,8 @@ void setup() {
     Serial.println("Kamera nie dziala - sterowanie bedzie dzialac bez obrazu");
   }
 
+  wifiBootCounter();
+  wifiLoad();
   wifiInit();
   startServers();
 }
@@ -918,8 +1079,27 @@ void loop() {
     hwDirty = false;
     hwSave();
   }
+  // Robot działa 10 s – to nie był szybki restart, zeruj licznik awaryjnego resetu Wi-Fi
+  static bool bootCleared = false;
+  if (!bootCleared && millis() > 10000) {
+    bootCleared = true;
+    prefs.begin("boot", false);
+    prefs.putUChar("n", 0);
+    prefs.end();
+  }
+  if (wifiScanReq) {
+    wifiScanReq = false;
+    WiFi.scanNetworks(true);          // asynchronicznie, wynik pod /scan
+  }
+  if (wifiApply) {
+    wifiSave(wifiNew);
+    rebootRequested = true;
+  }
+
   if (rebootRequested) {
     drive(0, 0);
+    if (hwDirty) hwSave();            // nie zgub niezapisanych zmian
+    if (camDirty) camSave();
     delay(300);                       // czas na wysłanie odpowiedzi do przeglądarki
     ESP.restart();
   }
