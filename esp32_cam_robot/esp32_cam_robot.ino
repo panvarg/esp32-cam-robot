@@ -1054,6 +1054,8 @@ static esp_err_t wifiHandler(httpd_req_t *req);
 static esp_err_t scanHandler(httpd_req_t *req);
 static esp_err_t sysHandler(httpd_req_t *req);
 static esp_err_t ioHandler(httpd_req_t *req);
+static esp_err_t layoutGetHandler(httpd_req_t *req);
+static esp_err_t layoutPostHandler(httpd_req_t *req);
 static esp_err_t updateHandler(httpd_req_t *req);
 
 static void handleCommand(const char *cmd) {
@@ -1287,6 +1289,10 @@ static void startServers() {
     httpd_uri_t sysUri = { "/sys", HTTP_GET, sysHandler, NULL };
     httpd_uri_t ioUri = { "/io", HTTP_GET, ioHandler, NULL };
     httpd_register_uri_handler(webHttpd, &ioUri);
+    httpd_uri_t layGet = { "/layout", HTTP_GET, layoutGetHandler, NULL };
+    httpd_uri_t layPost = { "/layout", HTTP_POST, layoutPostHandler, NULL };
+    httpd_register_uri_handler(webHttpd, &layGet);
+    httpd_register_uri_handler(webHttpd, &layPost);
     httpd_uri_t updateUri = { "/update", HTTP_POST, updateHandler, NULL };
     httpd_register_uri_handler(webHttpd, &sysUri);
     httpd_register_uri_handler(webHttpd, &updateUri);
@@ -1568,6 +1574,42 @@ static esp_err_t ioHandler(httpd_req_t *req) {
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   return httpd_resp_send(req, j.c_str(), j.length());
+}
+
+// ---------- Układ ekranu (edytor na stronie): JSON zapisany w pamięci ESP ----------
+#define LAYOUT_MAX 3800                // NVS przechowuje napisy do ok. 4000 bajtów
+
+static esp_err_t layoutGetHandler(httpd_req_t *req) {
+  prefs.begin("ui", true);
+  String l = prefs.getString("l", "{}");
+  prefs.end();
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, l.c_str(), l.length());
+}
+
+static esp_err_t layoutPostHandler(httpd_req_t *req) {
+  size_t len = req->content_len;
+  if (len == 0 || len > LAYOUT_MAX) {
+    httpd_resp_set_status(req, "400 Bad Request");
+    return httpd_resp_send(req, "Za duży układ.", HTTPD_RESP_USE_STRLEN);
+  }
+  char *buf = (char *)malloc(len + 1);
+  if (!buf) return httpd_resp_send_500(req);
+  size_t got = 0;
+  while (got < len) {
+    int r = httpd_req_recv(req, buf + got, len - got);
+    if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+    if (r <= 0) { free(buf); return ESP_FAIL; }
+    got += r;
+  }
+  buf[len] = 0;
+  prefs.begin("ui", false);
+  if (buf[0] == '{' && len > 2) prefs.putString("l", buf);
+  else prefs.remove("l");                // "{}" = układ domyślny
+  prefs.end();
+  free(buf);
+  return httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
 }
 
 // ---------- System: stan i aktualizacja przez Wi-Fi ----------

@@ -1,8 +1,8 @@
 #pragma once
 
-// Strona sterowania: podgląd z kamery na całym ekranie + dwie wirtualne gałki
-// (lewa = gaz przód/tył, prawa = skręt lewo/prawo), jak w grach wyścigowych.
-// Przycisk ⚙ otwiera menu ustawień obrazu (zapisywane w pamięci robota).
+// Strona sterowania: podgląd z kamery na całym ekranie + gałki i przyciski, których położenie,
+// rozmiar i funkcje ustawia się w edytorze układu (jak w emulatorach gier).
+// Przycisk ⚙ otwiera menu ustawień (zapisywane w pamięci robota).
 // Trzymaj telefon poziomo. Na komputerze działa też WASD / strzałki, F = światło.
 static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <html lang="pl">
@@ -30,7 +30,6 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   #rc{top:52px;left:10px;display:none;z-index:2}
   #rc.on{display:block;color:#fd5}
   #rc.armed{display:block;color:#000;background:rgba(80,220,120,.9)}
-  .zone.locked{opacity:.3}
   #readout{bottom:10px;left:50%;transform:translateX(-50%);font-variant-numeric:tabular-nums}
   #top{position:fixed;top:8px;left:50%;transform:translateX(-50%);display:flex;gap:8px;
     align-items:center;z-index:2}
@@ -59,9 +58,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   .seg button{flex:1;height:34px;border-radius:8px;border:1px solid rgba(255,255,255,.3);
     background:rgba(255,255,255,.08);color:#fff;font-size:13px}
   .seg button.on{background:#3b8fe0;border-color:#5aa8f0}
-  #menu select{height:36px;border-radius:8px;background:#22282e;color:#fff;
+  #menu select,#epanel select{height:36px;border-radius:8px;background:#22282e;color:#fff;
     border:1px solid rgba(255,255,255,.3);padding:0 8px;font-size:14px}
-  #menu input[type=range]{width:100%;accent-color:#3b8fe0}
+  #menu input[type=range],#epanel input[type=range]{width:100%;accent-color:#3b8fe0}
   .row{display:flex;justify-content:space-between;align-items:center}
   .row input[type=checkbox]{width:22px;height:22px;accent-color:#3b8fe0}
   .ends{display:flex;justify-content:space-between;font-size:11px;color:#8a949c}
@@ -84,7 +83,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   .chv .bar i{position:absolute;left:0;top:0;bottom:0;background:#3b8fe0}
   .chv.used{color:#fff}
   .chv .tag{grid-column:2 / 4;font-size:10px;color:#8fc6ff;margin-top:-4px}
-  #menu input[type=text],#menu input[type=password]{width:100%;min-width:0;height:36px;border-radius:8px;background:#22282e;color:#fff;
+  #menu input[type=text],#menu input[type=password],#epanel input[type=text]{width:100%;min-width:0;height:36px;border-radius:8px;background:#22282e;color:#fff;
     border:1px solid rgba(255,255,255,.3);padding:0 10px;font-size:14px;user-select:text;-webkit-user-select:text}
   .inrow{display:flex;gap:6px}
   .small{flex:none;height:36px;padding:0 12px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;font-size:13px}
@@ -114,40 +113,49 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   .msvg{width:100%;max-width:320px;height:auto;display:block;margin:0 auto 8px}
   .wnote{font-size:11px;color:#8a949c;margin:6px 0 0}
   .wbtn{height:38px;border-radius:8px;border:1px solid #5aa8f0;background:rgba(59,143,224,.15);color:#cfe6ff;font-size:14px}
-  .base.r{width:calc(2 * var(--R) + var(--K) + 14px);height:calc(2 * var(--R) + var(--K) + 14px)}
-  .base.r::before,.base.r::after{content:none}
-  /* dwie strefy: lewa połowa = gaz, prawa = skręt; gałka pojawia się pod palcem */
-  .zone{position:fixed;top:0;bottom:0;width:50%}
-  #zl{left:0} #zr{right:0}
-  /* strefa rozglądania (serwa pan/tilt): środkowy pas między gałkami */
-  #zm{position:fixed;top:60px;bottom:50px;left:35%;width:30%;display:none}
-  body.look #zm{display:block}
-  body.look #zl{width:35%} body.look #zr{width:35%}
-  #lookhud{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.7);
+  /* układ ekranu: elementy w % ekranu, rozmiar w % krótszego boku */
+  #lay{position:fixed;inset:0;z-index:1}
+  #lay.locked .li{opacity:.3}
+  .li{position:absolute;transform:translate(-50%,-50%);touch-action:none}
+  .sbase{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:999px;
+    border:3px solid rgba(255,255,255,.55);background:rgba(255,255,255,.07);pointer-events:none}
+  .sbase::before,.sbase::after{position:absolute;font-size:12px;line-height:1;color:rgba(255,255,255,.6)}
+  .sbase.v::before{content:"\25B2";top:7px;left:50%;transform:translateX(-50%)}
+  .sbase.v::after{content:"\25BC";bottom:7px;left:50%;transform:translateX(-50%)}
+  .sbase.h::before{content:"\25C0";left:9px;top:50%;transform:translateY(-50%)}
+  .sbase.h::after{content:"\25B6";right:9px;top:50%;transform:translateY(-50%)}
+  .sknob{position:absolute;left:50%;top:50%;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff,#9ad 70%);
+    box-shadow:0 2px 10px rgba(0,0,0,.6);opacity:.9;pointer-events:none}
+  .lb{display:flex;align-items:center;justify-content:center;border-radius:24%;border:2px solid rgba(255,255,255,.5);
+    background:rgba(0,0,0,.45);color:#fff;font-weight:600;overflow:hidden;white-space:nowrap}
+  .lb.round{border-radius:50%}
+  .lb.on{background:rgba(80,170,255,.85);border-color:#8cc8ff}
+  .lb.lgt.on{background:rgba(255,220,80,.85);color:#000;border-color:#fd5}
+  .lspd{display:flex;align-items:center;gap:4%;background:rgba(0,0,0,.45);border-radius:12px;padding:0 4%}
+  .lspd button{flex:1;height:76%;border-radius:8px;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.1);color:#fff;font-size:inherit;padding:0}
+  .lspd span{flex:1.3;text-align:center;font-weight:600;font-variant-numeric:tabular-nums}
+  .lpad{border:2px dashed rgba(255,255,255,.18);border-radius:16px}
+  .padhud{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);font-size:11px;color:rgba(255,255,255,.7);
     background:rgba(0,0,0,.35);padding:3px 8px;border-radius:8px;white-space:nowrap;pointer-events:none}
-  /* przyciski z menu „Przyciski” */
-  #abtns{position:fixed;top:8px;right:8px;z-index:3;display:grid;grid-template-columns:repeat(4,46px);gap:6px;direction:rtl}
-  #abtns button{direction:ltr;width:46px;height:46px;border-radius:12px;border:2px solid rgba(255,255,255,.45);
-    background:rgba(0,0,0,.45);color:#fff;font-size:15px;font-weight:600;padding:0;overflow:hidden;touch-action:none}
-  #abtns button.on{background:rgba(80,170,255,.85);border-color:#8cc8ff}
-  @media (orientation:portrait){ #abtns{top:110px} }
-  .base{position:absolute;border-radius:999px;border:3px solid rgba(255,255,255,.55);
-    background:rgba(255,255,255,.07);transform:translate(-50%,-50%);pointer-events:none;transition:opacity .2s}
-  .base.v{width:calc(var(--K) + 14px);height:calc(2 * var(--R) + var(--K) + 14px)}
-  .base.h{width:calc(2 * var(--R) + var(--K) + 14px);height:calc(var(--K) + 14px)}
-  .base::before,.base::after{position:absolute;font-size:12px;line-height:1;color:rgba(255,255,255,.6)}
-  .base.v::before{content:"\25B2";top:7px;left:50%;transform:translateX(-50%)}
-  .base.v::after{content:"\25BC";bottom:7px;left:50%;transform:translateX(-50%)}
-  .base.h::before{content:"\25C0";left:9px;top:50%;transform:translateY(-50%)}
-  .base.h::after{content:"\25B6";right:9px;top:50%;transform:translateY(-50%)}
-  .knob{position:absolute;left:50%;top:50%;width:var(--K);height:var(--K);margin:calc(var(--K) / -2) 0 0 calc(var(--K) / -2);
-    border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff,#9ad 70%);
-    box-shadow:0 2px 10px rgba(0,0,0,.6);opacity:.9;z-index:1}
+  /* edytor układu */
+  body.editing .li{outline:2px dashed rgba(120,190,255,.75);outline-offset:2px;background:rgba(40,80,140,.18);border-radius:12px}
+  body.editing .li.sel{outline:2px solid #5aa8f0;background:rgba(40,80,140,.4)}
+  body.editing .li *{pointer-events:none}
+  body.editing #top,body.editing #readout,body.editing #hint,body.editing #rc{display:none}
+  #etb{position:fixed;top:6px;left:50%;transform:translateX(-50%);z-index:15;display:flex;flex-wrap:wrap;gap:6px;
+    justify-content:center;align-items:center;width:max-content;max-width:96vw;background:rgba(16,19,23,.94);padding:6px;border-radius:12px;font-size:12px}
+  #etb button{height:32px;padding:0 9px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;font-size:13px}
+  #etb .done{background:#3b8fe0;border-color:#5aa8f0;font-weight:600}
+  #etb input{width:80px;accent-color:#3b8fe0}
+  #epanel{position:fixed;left:50%;bottom:6px;transform:translateX(-50%);width:min(380px,96vw);max-height:52vh;overflow:auto;z-index:15;
+    background:rgba(16,19,23,.96);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:10px 12px;
+    display:flex;flex-direction:column;gap:10px;touch-action:pan-y;color:#fff}
   #hint{position:fixed;bottom:10px;right:10px;font-size:11px;color:#bbb}
   @media (pointer:coarse){#hint{display:none}}
   @media (orientation:portrait){
     #top{top:56px}
   }
+  #top{z-index:4}
 </style>
 </head>
 <body>
@@ -158,20 +166,19 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <div id="rc" class="hud"></div>
 <div id="readout" class="hud">L 0 · P 0</div>
 
-<div class="zone" id="zm"><div id="lookhud">przeciągnij, aby obrócić kamerę · dwuklik = środek</div></div>
-<div id="abtns"></div>
-<div class="zone" id="zl"><div class="base v"><div class="knob"></div></div></div>
-<div class="zone" id="zr"><div class="base h"><div class="knob"></div></div></div>
+<div id="lay"></div>
 
 <div id="top">
-  <div class="btn" id="light" title="Światło (F)">&#128161;</div>
   <div class="btn" id="gear" title="Ustawienia">&#9881;</div>
-  <div class="speed">
-    <button id="down">&minus;</button>
-    <span id="spd">70%</span>
-    <button id="up">+</button>
-  </div>
 </div>
+
+<div id="etb" hidden>
+  <button data-add="stick">+ Gałka</button><button data-add="btn">+ Przycisk</button><button data-add="pad">+ Kamera</button>
+  <button data-add="light">+ Światło</button><button data-add="speed">+ Moc</button>
+  <label>Krycie <input type="range" id="eop" min="20" max="100" step="5"></label>
+  <button id="edef">Domyślny</button><button class="done" id="edone">Gotowe</button>
+</div>
+<div id="epanel" hidden></div>
 
 <div id="menu" hidden>
   <div class="mhead">Ustawienia <button id="mclose" aria-label="Zamknij">&#10005;</button></div>
@@ -246,7 +253,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   </div>
 
   <div class="mbody" id="tab-naped" hidden>
-    <button class="wbtn wshow">Schemat połączeń</button>
+    <div class="inrow"><button class="wbtn wshow" style="flex:1">Schemat połączeń</button><button class="wbtn eopen" style="flex:1">Układ ekranu</button></div>
     <div class="grp"><label>Sterownik silników</label>
       <div class="seg" data-h="drv"><button data-v="0">L298N</button><button data-v="1">TB6612FNG</button></div>
     </div>
@@ -337,7 +344,8 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   </div>
 
   <div class="mbody" id="tab-przyciski" hidden>
-    <p class="note">Przyciski pojawiają się w prawym górnym rogu ekranu. Każdy można też wyzwalać przełącznikiem aparatury.</p>
+    <button class="wbtn eopen">Edytuj układ ekranu</button>
+    <p class="note">Tu ustawiasz, co robi każdy z 8 przycisków. Na ekran dodajesz je w edytorze układu, tam też zmienisz ich położenie i rozmiar. Każdy można też wyzwalać przełącznikiem aparatury.</p>
     <div class="grp" id="acts"></div>
     <div class="grp" id="actmsg"></div>
     <button class="primary hwreboot">Zapisz i uruchom ponownie</button>
@@ -387,7 +395,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     <div class="grp"><label>Kopia ustawień</label>
       <div class="inrow"><button class="small" id="bkdown">Zapisz do pliku</button><button class="small" id="bkpick">Wczytaj z pliku</button></div>
       <input type="file" id="bkfile" accept=".json,application/json" hidden>
-      <p class="note">Plik zawiera ustawienia obrazu, napędu, aparatury, serw, przycisków i Wi-Fi, bez haseł.</p>
+      <p class="note">Plik zawiera ustawienia obrazu, napędu, aparatury, serw, przycisków, układ ekranu i Wi-Fi, bez haseł.</p>
       <div class="grp" id="bkmsg"></div>
     </div>
     <div class="sep"></div>
@@ -427,7 +435,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       if (p.length >= 10 && +p[9] !== actMaskNow){ actMaskNow = +p[9]; markButtons(); }
       showRc(+p[1]);
       var l = p[2] === '1';
-      if (l !== light){ light = l; lightEl.classList.toggle('on', light); markButtons(); }
+      if (l !== light){ light = l; showLight(); }
       if (p[3] !== undefined) stxt.textContent = 'połączono · ' + p[3] + ' fps' + (p[4] ? ' · ' + p[4] + ' KB' : '');
     };
     ws.onclose = function(){ showRc(0); dot.className = ''; stxt.textContent = 'rozłączono'; setTimeout(connect, 1000); };
@@ -437,23 +445,27 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   function showRc(st){
     rcEl.className = 'hud' + (st === 2 ? ' armed' : st === 1 ? ' on' : '');
     rcEl.textContent = st === 2 ? 'Aparatura steruje' : st === 1 ? 'Aparatura połączona' : '';
-    zl.classList.toggle('locked', st === 2);
-    zr.classList.toggle('locked', st === 2);
+    lay.classList.toggle('locked', st === 2);
   }
   function send(msg){ if (ws && ws.readyState === 1) ws.send(msg); }
   connect();
 
   // ---------- moc ----------
-  var speed = 70, spdEl = document.getElementById('spd');
-  function setSpeed(v){ speed = Math.max(20, Math.min(100, v)); spdEl.textContent = speed + '%'; markButtons(); }
-  tap('up', function(){ setSpeed(speed + 10); });
-  tap('down', function(){ setSpeed(speed - 10); });
+  var speed = 70;
+  function setSpeed(v){
+    speed = Math.max(20, Math.min(100, v));
+    document.querySelectorAll('#lay .spdv').forEach(function(e){ e.textContent = speed + '%'; });
+    markButtons();
+  }
 
   // ---------- światło ----------
-  var light = false, lightEl = document.getElementById('light');
+  var light = false;
   function sendLight(){ send('L ' + (light ? 1 : 0)); }
-  function toggleLight(){ light = !light; lightEl.classList.toggle('on', light); sendLight(); }
-  tap('light', toggleLight);
+  function toggleLight(){ light = !light; showLight(); sendLight(); }
+  function showLight(){
+    document.querySelectorAll('#lay [data-light]').forEach(function(e){ e.classList.toggle('on', light); });
+    markButtons();
+  }
 
   // ---------- ustawienia obrazu ----------
   var menu = document.getElementById('menu');
@@ -566,79 +578,336 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     document.getElementById(id).addEventListener('pointerdown', function(e){ e.preventDefault(); e.stopPropagation(); fn(); });
   }
 
-  // ---------- dwie gałki ----------
-  // axis 'y' = gaz (góra/dół), axis 'x' = skręt (lewo/prawo)
-  // rozmiar gałek dopasowany do ekranu (w poziomie telefon ma czasem tylko ~250 px wysokości)
-  var KNOB = 76;
-  function layoutSticks(){
-    var h = window.innerHeight, w = window.innerWidth / 2;
-    KNOB = h < 340 ? 60 : 76;
-    RADIUS = Math.max(36, Math.min(85, Math.floor((Math.min(h, w) - KNOB - 30) / 2)));
-    document.documentElement.style.setProperty('--R', RADIUS + 'px');
-    document.documentElement.style.setProperty('--K', KNOB + 'px');
-  }
-  layoutSticks();
-  window.addEventListener('resize', layoutSticks);
+  // ---------- układ ekranu: gałki, przyciski, pole kamery, światło, moc ----------
+  // x / y – środek elementu w % szerokości / wysokości ekranu, s – rozmiar w % krótszego boku.
+  // Osobne układy dla poziomego i pionowego trzymania telefonu (jak w emulatorach).
+  var lay = document.getElementById('lay'), layout = null, layCustom = false, editing = false, selIdx = null;
+  var FX = [['none', 'brak'], ['turn', 'skręt / obrót'], ['strafe', 'jazda bokiem (Mecanum)'], ['pan', 'kamera – pan']];
+  var FY = [['none', 'brak'], ['gas', 'gaz (przód / tył)'], ['tilt', 'kamera – tilt']];
+  function portrait(){ return window.innerHeight > window.innerWidth; }
+  function items(){ return layout[portrait() ? 'port' : 'land']; }
+  function unit(){ return Math.min(window.innerWidth, window.innerHeight) / 100; }
 
-  // axis: 'y' – tylko góra/dół, 'x' – tylko lewo/prawo, 'xy' – okrągła (Mecanum: jazda + bok)
-  function makeStick(zone, axis){
-    var base = zone.querySelector('.base'), knob = zone.querySelector('.knob');
-    var st = { id: null, cx: 0, cy: 0, vx: 0, vy: 0, edge: false };
-    function home(){
-      var r = zone.getBoundingClientRect();
-      base.style.left = (r.width / 2) + 'px';
-      base.style.top = (r.height / 2) + 'px';
-      base.style.opacity = '.55';
+  function defaultLayout(){
+    var mec = hwS && hwS.bootMode === 1;
+    function base(port){
+      var y = port ? 76 : 60, s = port ? 40 : 44, L = [
+        { t: 'stick', x: port ? 25 : 16, y: y, s: s, fx: mec ? 'strafe' : 'none', fy: 'gas', fl: 1, sp: 1 },
+        { t: 'stick', x: port ? 75 : 84, y: y, s: s, fx: 'turn', fy: 'none', fl: 1, sp: 1 },
+        { t: 'light', x: port ? 22 : 37, y: port ? 8 : 9, s: 12 },
+        { t: 'speed', x: port ? 76 : 64, y: port ? 8 : 9, s: 12 } ];
+      if (ioS && ioS.s.some(function(sv){ return (sv.ct === 1 || sv.ct === 2) && sv.o >= 0; }))
+        L.push({ t: 'pad', x: 50, y: port ? 40 : 55, s: port ? 40 : 38 });
+      var n = 0;                       // przyciski oznaczone w starszej wersji jako „Pokaż na ekranie”
+      if (ioS) ioS.a.forEach(function(a, i){
+        if (a.t && a.sh){ L.push({ t: 'btn', a: i, x: (port ? 90 : 95) - (n % 4) * (port ? 14 : 7), y: (port ? 17 : 11) + Math.floor(n / 4) * (port ? 8 : 15), s: 12 }); n++; }
+      });
+      return L;
     }
+    return { v: 1, op: 85, land: base(false), port: base(true) };
+  }
+  function ensureLayout(){
+    if (!layCustom && !editing && hwS) layout = defaultLayout();   // domyślny nadąża za trybem napędu i serwami
+    if (layout) renderLayout();
+  }
+  function loadLayout(){
+    fetch('/layout', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(j){
+      if (j && j.land && j.port){ layout = j; layCustom = true; }
+      ensureLayout();
+    }).catch(function(){ ensureLayout(); });
+  }
+  function saveLayout(){
+    layCustom = true;
+    fetch('/layout', { method: 'POST', body: JSON.stringify(layout) }).catch(function(){});
+  }
+
+  function stickGeom(it){
+    var D = it.s * unit(), round = it.fx !== 'none' && it.fy !== 'none';
+    var T = round ? D : D * 0.42, K = round ? D * 0.4 : T * 0.82;
+    return { D: D, T: T, K: K, R: Math.max(10, (D - K) / 2 - 3), round: round };
+  }
+  function iconFor(a){ return a.l || (a.t === 5 ? a.a + '%' : ACT_ICON[a.t] || '?'); }
+
+  function renderLayout(){
+    if (!layout) return;
+    lay.innerHTML = '';
+    lay.style.opacity = editing ? 1 : layout.op / 100;
+    var u = unit();
+    items().forEach(function(it, idx){
+      var el = document.createElement('div'), D = it.s * u;
+      el.className = 'li' + (editing && idx === selIdx ? ' sel' : '');
+      el.style.left = it.x + '%';
+      el.style.top = it.y + '%';
+      el.dataset.idx = idx;
+      it.vx = it.vx || 0; it.vy = it.vy || 0;
+      if (it.t === 'stick'){
+        var g = stickGeom(it), hit = D * 1.25;
+        el.style.width = el.style.height = hit + 'px';
+        var b = document.createElement('div');
+        b.className = 'sbase' + (g.round ? '' : it.fx === 'none' ? ' v' : ' h');
+        b.style.width = (g.round || it.fy === 'none' ? g.D : g.T) + 'px';
+        b.style.height = (g.round || it.fx === 'none' ? g.D : g.T) + 'px';
+        var k = document.createElement('div');
+        k.className = 'sknob';
+        k.style.width = k.style.height = g.K + 'px';
+        k.style.margin = (-g.K / 2) + 'px 0 0 ' + (-g.K / 2) + 'px';
+        b.appendChild(k);
+        el.appendChild(b);
+        if (!editing) bindStick(el, it, b, k, g);
+      } else if (it.t === 'btn' || it.t === 'light'){
+        var a = it.t === 'btn' && ioS ? ioS.a[it.a] : null;
+        el.className += ' lb' + (it.t === 'light' ? ' lgt round' : '');
+        el.style.width = el.style.height = D + 'px';
+        el.style.fontSize = (D * 0.38) + 'px';
+        el.textContent = it.t === 'light' ? '💡' : a ? iconFor(a) : '?';
+        if (it.t === 'light'){ el.dataset.light = 1; if (hwS && !hwS.lightOk && !editing) el.style.display = 'none'; }
+        else el.dataset.b = it.a;
+        if (!editing) bindButton(el, it);
+      } else if (it.t === 'speed'){
+        el.className += ' lspd';
+        el.style.width = (D * 3.2) + 'px';
+        el.style.height = D + 'px';
+        el.style.fontSize = (D * 0.34) + 'px';
+        el.innerHTML = '<button data-d="-10">&minus;</button><span class="spdv">' + speed + '%</span><button data-d="10">+</button>';
+        if (!editing) el.addEventListener('pointerdown', function(e){
+          var d = e.target.dataset.d;
+          e.preventDefault(); e.stopPropagation();
+          if (d) setSpeed(speed + +d);
+        });
+      } else if (it.t === 'pad'){
+        el.className += ' lpad';
+        el.style.width = el.style.height = D + 'px';
+        el.innerHTML = '<div class="padhud">przeciągnij – kamera · dwuklik – środek</div>';
+        if (!editing) bindPad(el);
+      }
+      lay.appendChild(el);
+    });
+    if (editing) bindEditor();
+    showLight();
+  }
+  window.addEventListener('resize', function(){ if (layout) renderLayout(); });
+
+  // gałka: osie mogą sterować jazdą albo serwami; pływająca pojawia się pod palcem
+  function bindStick(el, it, base, knob, g){
+    var id = null, cx = 0, cy = 0, sent = 0;
     function move(e){
-      var dx = axis === 'y' ? 0 : e.clientX - st.cx;
-      var dy = axis === 'x' ? 0 : e.clientY - st.cy;
+      var dx = it.fx === 'none' ? 0 : e.clientX - cx, dy = it.fy === 'none' ? 0 : e.clientY - cy;
       var d = Math.sqrt(dx * dx + dy * dy);
-      if (d > RADIUS){ dx = dx / d * RADIUS; dy = dy / d * RADIUS; d = RADIUS; }
+      if (d > g.R){ dx = dx / d * g.R; dy = dy / d * g.R; d = g.R; }
       knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
-      var n = d / RADIUS;
-      var k = n < DEADZONE ? 0 : (n - DEADZONE) / (1 - DEADZONE) / n;   // przeskalowanie poza martwą strefą
-      st.vx = dx / RADIUS * k;
-      st.vy = -dy / RADIUS * k;                                        // w górę = do przodu
-      if (navigator.vibrate && n >= 1 && !st.edge) navigator.vibrate(8);
-      st.edge = n >= 1;
+      var n = d / g.R, k = n < DEADZONE ? 0 : (n - DEADZONE) / (1 - DEADZONE) / n;
+      it.vx = dx / g.R * k;
+      it.vy = -dy / g.R * k;
+      if (Date.now() - sent > 40){ stickServos(it); sent = Date.now(); }
     }
-    function end(e){
-      if (e.pointerId !== st.id) return;
-      st.id = null; st.vx = 0; st.vy = 0; st.edge = false;
-      knob.style.transform = '';
-      home();
-      pushNow();
-    }
-    zone.addEventListener('pointerdown', function(e){
-      if (st.id !== null) return;
+    el.addEventListener('pointerdown', function(e){
+      if (id !== null) return;
       e.preventDefault();
-      st.id = e.pointerId;
-      try { zone.setPointerCapture(e.pointerId); } catch (err) {}
-      var r = zone.getBoundingClientRect();
-      // środek toru pod palcem, ale przesunięty tak, żeby cały tor mieścił się na ekranie
-      var m = RADIUS + KNOB / 2 + 10, cx = e.clientX, cy = e.clientY;
-      if (axis !== 'x') cy = Math.max(r.top + m, Math.min(window.innerHeight - m, cy));
-      if (axis !== 'y') cx = Math.max(r.left + m, Math.min(r.right - m, cx));
-      st.cx = cx; st.cy = cy;                        // gałka pojawia się pod palcem
-      base.style.left = (cx - r.left) + 'px';
-      base.style.top = (cy - r.top) + 'px';
-      base.style.opacity = '1';
+      id = e.pointerId;
+      try { el.setPointerCapture(id); } catch (err) {}
+      var r = el.getBoundingClientRect();
+      if (it.fl){                      // pływająca: środek pod palcem, ale tor zostaje w polu dotyku
+        var mx = r.width / 2 - g.R - g.K / 2, my = r.height / 2 - g.R - g.K / 2;
+        var ox = Math.max(-mx, Math.min(mx, e.clientX - (r.left + r.width / 2)));
+        var oy = Math.max(-my, Math.min(my, e.clientY - (r.top + r.height / 2)));
+        base.style.left = 'calc(50% + ' + ox + 'px)';
+        base.style.top = 'calc(50% + ' + oy + 'px)';
+        cx = r.left + r.width / 2 + ox; cy = r.top + r.height / 2 + oy;
+      } else { cx = r.left + r.width / 2; cy = r.top + r.height / 2; }
       move(e);
     });
-    zone.addEventListener('pointermove', function(e){ if (e.pointerId === st.id) move(e); });
-    zone.addEventListener('pointerup', end);
-    zone.addEventListener('pointercancel', end);
-    window.addEventListener('resize', function(){ if (st.id === null) home(); });
-    st.setAxis = function(a){
-      axis = a;
-      base.className = 'base ' + (a === 'xy' ? 'r' : a === 'y' ? 'v' : 'h');
-    };
-    home();
-    return st;
+    el.addEventListener('pointermove', function(e){ if (e.pointerId === id) move(e); });
+    function end(e){
+      if (e.pointerId !== id) return;
+      id = null;
+      if (it.sp){
+        it.vx = 0; it.vy = 0;
+        knob.style.transform = '';
+        base.style.left = base.style.top = '';
+        stickServos(it);
+      } else stickServos(it);
+      pushNow();
+    }
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
   }
-  var zl = document.getElementById('zl'), zr = document.getElementById('zr');
-  var gas = makeStick(zl, 'y'), steer = makeStick(zr, 'x');
+  // osie gałki przypisane do serw: wychylenie = kąt (od min przez środek do max)
+  function stickServos(it){
+    if (!ioS) return;
+    function apply(f, v){
+      var list = f === 'pan' ? lookServos(1) : f === 'tilt' ? lookServos(2)
+        : /^sv\d$/.test(f) ? [{ s: ioS.s[+f[2]], i: +f[2] }] : [];
+      list.forEach(function(x){
+        var sv = x.s, ang = v >= 0 ? sv.c + v * (sv.mx - sv.c) : sv.c + v * (sv.c - sv.mn);
+        lookPos[x.i] = ang;
+        send('S ' + x.i + ' p ' + Math.round(ang));
+      });
+    }
+    apply(it.fx, it.vx || 0);
+    apply(it.fy, it.vy || 0);
+  }
+  function bindButton(el, it){
+    var held = null;
+    el.addEventListener('pointerdown', function(e){
+      e.preventDefault(); e.stopPropagation();
+      if (it.t === 'light'){ toggleLight(); return; }
+      if (!ioS) return;
+      held = e.pointerId;
+      try { el.setPointerCapture(held); } catch (err) {}
+      pressAct(it.a, true);
+    });
+    function up(e){ if (held !== null && e.pointerId === held){ held = null; pressAct(it.a, false); } }
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+
+  // ---------- edytor układu ----------
+  var etb = document.getElementById('etb'), epanel = document.getElementById('epanel');
+  function openEditor(){
+    if (!layout) return;
+    menu.hidden = true;
+    editing = true; selIdx = null;
+    layCustom = true;                 // od teraz układ jest własny – nie zastępuje go domyślny
+    document.body.classList.add('editing');
+    etb.hidden = false;
+    document.getElementById('eop').value = layout.op;
+    renderLayout();
+    renderPanel();
+  }
+  function closeEditor(){
+    editing = false; selIdx = null;
+    document.body.classList.remove('editing');
+    etb.hidden = true; epanel.hidden = true;
+    saveLayout();
+    renderLayout();
+  }
+  document.querySelectorAll('.eopen').forEach(function(b){ b.addEventListener('click', openEditor); });
+  document.getElementById('edone').addEventListener('click', closeEditor);
+  document.getElementById('edef').addEventListener('click', function(){
+    layout[portrait() ? 'port' : 'land'] = defaultLayout()[portrait() ? 'port' : 'land'];
+    selIdx = null; renderLayout(); renderPanel();
+  });
+  document.getElementById('eop').addEventListener('input', function(){ layout.op = +this.value; });
+  etb.addEventListener('click', function(e){
+    var t = e.target.dataset.add;
+    if (!t) return;
+    var it = { t: t, x: 50, y: 50, s: t === 'stick' ? 40 : t === 'pad' ? 36 : 12 };
+    if (t === 'stick'){ it.fx = 'turn'; it.fy = 'gas'; it.fl = 1; it.sp = 1; }
+    if (t === 'btn'){
+      var used = items().filter(function(x){ return x.t === 'btn'; }).map(function(x){ return x.a; });
+      var free = [0, 1, 2, 3, 4, 5, 6, 7].filter(function(i){ return used.indexOf(i) < 0; });
+      if (!free.length){ alertPanel('Na ekranie może być najwyżej 8 przycisków.'); return; }
+      it.a = free[0];
+    }
+    items().push(it);
+    selIdx = items().length - 1;
+    renderLayout(); renderPanel();
+  });
+  function alertPanel(t){ epanel.hidden = false; epanel.innerHTML = '<div class="msg warn">' + t + '</div>'; }
+
+  // przeciąganie elementów, a dwoma palcami – zmiana rozmiaru zaznaczonego
+  var eptr = {}, edrag = null, epinch = null;
+  function bindEditor(){
+    lay.querySelectorAll('.li').forEach(function(el){
+      el.addEventListener('pointerdown', function(e){
+        e.preventDefault(); e.stopPropagation();
+        var idx = +el.dataset.idx, it = items()[idx];
+        eptr[e.pointerId] = { x: e.clientX, y: e.clientY };
+        try { el.setPointerCapture(e.pointerId); } catch (err) {}
+        if (Object.keys(eptr).length === 2 && selIdx !== null){
+          var p = Object.values(eptr);
+          epinch = { d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y), s: items()[selIdx].s };
+          edrag = null;
+          return;
+        }
+        edrag = { id: e.pointerId, idx: idx, sx: e.clientX, sy: e.clientY, x: it.x, y: it.y, moved: false };
+        if (selIdx !== idx){ selIdx = idx; lay.querySelectorAll('.li').forEach(function(x){ x.classList.toggle('sel', x === el); }); renderPanel(); }
+      });
+      el.addEventListener('pointermove', function(e){
+        if (!eptr[e.pointerId]) return;
+        eptr[e.pointerId] = { x: e.clientX, y: e.clientY };
+        if (epinch && Object.keys(eptr).length >= 2){
+          var p = Object.values(eptr), d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+          items()[selIdx].s = Math.round(Math.max(6, Math.min(80, epinch.s * d / epinch.d)));
+          renderLayout(); syncSize();
+          return;
+        }
+        if (!edrag || e.pointerId !== edrag.id) return;
+        var dx = e.clientX - edrag.sx, dy = e.clientY - edrag.sy;
+        if (Math.abs(dx) + Math.abs(dy) > 4) edrag.moved = true;
+        var it = items()[edrag.idx];
+        it.x = Math.round(Math.max(0, Math.min(100, edrag.x + dx / window.innerWidth * 100)) * 2) / 2;
+        it.y = Math.round(Math.max(0, Math.min(100, edrag.y + dy / window.innerHeight * 100)) * 2) / 2;
+        el.style.left = it.x + '%';
+        el.style.top = it.y + '%';
+      });
+      function up(e){
+        delete eptr[e.pointerId];
+        if (Object.keys(eptr).length < 2) epinch = null;
+        if (edrag && e.pointerId === edrag.id) edrag = null;
+      }
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
+  }
+  // dotknięcie pustego miejsca odznacza element
+  lay.addEventListener('pointerdown', function(e){ if (editing && e.target === lay){ selIdx = null; renderLayout(); renderPanel(); } });
+
+  function svOpts(list, v){
+    var o = list.slice();
+    if (ioS) ioS.s.forEach(function(sv, i){ o.push(['sv' + i, 'serwo „' + sv.n + '”']); });
+    return o.map(function(x){ return '<option value="' + x[0] + '"' + (x[0] === v ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('');
+  }
+  function syncSize(){
+    var r = epanel.querySelector('[data-lk="s"]');
+    if (r && selIdx !== null){ r.value = items()[selIdx].s; r.parentNode.querySelector('[data-u]').textContent = items()[selIdx].s + '%'; }
+  }
+  var TYPE_NAMES = { stick: 'Gałka', btn: 'Przycisk', pad: 'Pole kamery', light: 'Światło', speed: 'Moc' };
+  function renderPanel(){
+    if (!editing){ epanel.hidden = true; return; }
+    epanel.hidden = false;
+    if (selIdx === null || !items()[selIdx]){
+      epanel.innerHTML = '<p class="note">Przeciągnij element, żeby go przesunąć. Dotknij go, żeby zmienić rozmiar i funkcję – rozmiar zmienisz też dwoma palcami. ' +
+        'Układ dla telefonu trzymanego ' + (portrait() ? 'pionowo' : 'poziomo') + ' – obróć telefon, żeby ustawić drugi.</p>';
+      return;
+    }
+    var it = items()[selIdx], h = '<div class="pinrow"><b>' + TYPE_NAMES[it.t] + '</b><button class="small" id="edel">Usuń</button></div>';
+    h += rng('Rozmiar', 'data-lk', 's', it.s, 6, 80, 1, '%');
+    if (it.t === 'stick'){
+      h += '<div class="pinrow"><span>Lewo / prawo</span><select data-lk="fx">' + svOpts(FX, it.fx) + '</select></div>';
+      h += '<div class="pinrow"><span>Góra / dół</span><select data-lk="fy">' + svOpts(FY, it.fy) + '</select></div>';
+      h += '<div class="row"><label>Pływająca – pojawia się pod palcem</label><input type="checkbox" data-lk="fl"' + (it.fl ? ' checked' : '') + '></div>';
+      h += '<div class="row"><label>Wraca na środek po puszczeniu</label><input type="checkbox" data-lk="sp"' + (it.sp ? ' checked' : '') + '></div>';
+      h += '<p class="note">Jedna oś = tor, dwie osie = okrągła gałka. Bez powrotu na środek gaz działa jak tempomat, a kamera zostaje tam, gdzie ją ustawisz.</p>';
+    } else if (it.t === 'btn' && ioS){
+      h += actCard(ioS.a[it.a], it.a);
+      h += '<p class="note">To przycisk nr ' + (it.a + 1) + ' z zakładki Przyciski – tę samą funkcję można wyzwalać z aparatury.</p>';
+    } else if (it.t === 'pad'){
+      h += '<p class="note">Przeciąganie palcem obraca kamerę (serwa ustawione w zakładce Serwa jako pan i tilt), dwuklik ją centruje.</p>';
+    }
+    epanel.innerHTML = h;
+    epanel.querySelectorAll('[data-ak="o"]').forEach(function(sel){ pinOptions(sel, ioS.a[it.a].o, true, true); });
+  }
+  epanel.addEventListener('input', function(e){
+    var k = e.target.dataset.lk;
+    if (k !== 's' || selIdx === null) return;
+    items()[selIdx].s = +e.target.value;
+    e.target.parentNode.querySelector('[data-u]').textContent = e.target.value + '%';
+    renderLayout();
+  });
+  epanel.addEventListener('change', function(e){
+    var t = e.target, k = t.dataset.lk;
+    if (!k || selIdx === null) return;
+    var it = items()[selIdx];
+    it[k] = t.type === 'checkbox' ? (t.checked ? 1 : 0) : k === 's' ? +t.value : t.value;
+    renderLayout(); renderPanel();
+  });
+  epanel.addEventListener('click', function(e){
+    if (e.target.id !== 'edel' || selIdx === null) return;
+    items().splice(selIdx, 1);
+    selIdx = null;
+    renderLayout(); renderPanel();
+  });
 
   // ---------- klawiatura ----------
   var keys = {};
@@ -664,10 +933,14 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   // ---------- wysyłanie ----------
   var last = '', lastSent = 0, readout = document.getElementById('readout');
   function command(){
-    var k = keyAxis();
-    var x = steer.id !== null ? steer.vx : k.x;
-    var y = gas.id !== null ? gas.vy : k.y;
-    var sd = mecanum ? (gas.id !== null ? gas.vx : k.s) : 0;
+    var x = 0, y = 0, sd = 0;
+    if (layout) items().forEach(function(it){
+      if (it.t !== 'stick') return;
+      if (it.fx === 'turn') x += it.vx || 0; else if (it.fx === 'strafe') sd += it.vx || 0;
+      if (it.fy === 'gas') y += it.vy || 0;
+    });
+    if (!x && !y && !sd){ var k = keyAxis(); x = k.x; y = k.y; sd = k.s; }
+    x = Math.max(-1, Math.min(1, x)); y = Math.max(-1, Math.min(1, y)); sd = mecanum ? Math.max(-1, Math.min(1, sd)) : 0;
     var s = speed / 100;
     var X = Math.round(x * TURN * s * 100), Y = Math.round(y * s * 100), S = Math.round(sd * s * 100);
     return mecanum ? 'M ' + X + ' ' + Y + ' ' + S : 'M ' + X + ' ' + Y;
@@ -700,8 +973,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   function applyMode(){
     mecanum = hwS.bootMode === 1;
     if (hwS.dz !== undefined) DEADZONE = hwS.dz / 100;
-    gas.setAxis(mecanum ? 'xy' : 'y');
-    lightEl.style.display = hwS.lightOk ? '' : 'none';
+    ensureLayout();                   // układ domyślny zależy od trybu napędu i serw
   }
   var hwTimer = null;
   function setHw(k, v){
@@ -928,6 +1200,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     }
   }
   loadHw();
+  loadLayout();
 
   // ---------- serwa i przyciski (menu) ----------
   var SV_CTRL = ['tylko przyciski', 'przeciąganie obrazu w poziomie (pan)', 'przeciąganie obrazu w pionie (tilt)', 'kanał aparatury'];
@@ -970,30 +1243,29 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     $('servos').innerHTML = h;
     $('servos').querySelectorAll('[data-sk="o"]').forEach(function(sel){ pinOptions(sel, ioS.s[+sel.closest('[data-s]').dataset.s].o, true, true); });
 
-    h = '';
-    ioS.a.forEach(function(a, i){
-      h += '<div class="wcard" data-a="' + i + '"><div class="pinrow"><b>Przycisk ' + (i + 1) + '</b><select data-ak="t">' + opt(ACT_TYPES, a.t) + '</select></div>';
-      if (a.t){
-        h += '<div class="pinrow"><span>Napis (np. emoji)</span><input type="text" data-ak="l" maxlength="7" value="' + esc(a.l) + '" placeholder="' + ACT_ICON[a.t] + '"></div>';
-        h += '<div class="row"><label>Pokaż na ekranie</label><input type="checkbox" data-ak="sh"' + (a.sh ? ' checked' : '') + '></div>';
-        if (a.t === 2 || a.t === 3) h += '<div class="pinrow"><span>Działanie</span><select data-ak="m">' + opt(['przełącznik (klik włącza i wyłącza)', 'tylko przytrzymany'], a.m) + '</select></div>';
-        if (a.t === 2) h += '<div class="pinrow"><span>Wyjście</span><select data-ak="o"></select></div>';
-        if (a.t === 3) h += '<div class="pinrow"><span>Serwo</span><select data-ak="sv">' + opt(ioS.s.map(function(x){ return x.n; }), a.sv) + '</select></div>' +
-          rng('Pozycja po włączeniu', 'data-ak', 'a', a.a, 0, 180, 1, '°') + rng('Pozycja po wyłączeniu', 'data-ak', 'b', a.b, 0, 180, 1, '°');
-        if (a.t === 5) h += rng('Moc', 'data-ak', 'a', Math.max(20, Math.min(100, a.a)), 20, 100, 10, '%');
-        if (a.t >= 1 && a.t <= 4) h += '<div class="pinrow"><span>Też z kanału aparatury</span><select data-ak="ch">' + chOpts(a.ch) + '</select></div>';
-      }
-      h += '</div>';
-    });
-    $('acts').innerHTML = h;
+    $('acts').innerHTML = ioS.a.map(actCard).join('');
     $('acts').querySelectorAll('[data-ak="o"]').forEach(function(sel){ pinOptions(sel, ioS.a[+sel.closest('[data-a]').dataset.a].o, true, true); });
-    renderButtons();
-    updateLook();
+    ioS.s.forEach(function(sv, i){ if (lookPos[i] === undefined) lookPos[i] = sv.pos; });
+    ensureLayout();
+    if (editing) renderPanel();
+  }
+  function actCard(a, i){
+    var h = '<div class="wcard" data-a="' + i + '"><div class="pinrow"><b>Przycisk ' + (i + 1) + '</b><select data-ak="t">' + opt(ACT_TYPES, a.t) + '</select></div>';
+    if (a.t){
+      h += '<div class="pinrow"><span>Napis (np. emoji)</span><input type="text" data-ak="l" maxlength="7" value="' + esc(a.l) + '" placeholder="' + ACT_ICON[a.t] + '"></div>';
+      if (a.t === 2 || a.t === 3) h += '<div class="pinrow"><span>Działanie</span><select data-ak="m">' + opt(['przełącznik (klik włącza i wyłącza)', 'tylko przytrzymany'], a.m) + '</select></div>';
+      if (a.t === 2) h += '<div class="pinrow"><span>Wyjście</span><select data-ak="o"></select></div>';
+      if (a.t === 3) h += '<div class="pinrow"><span>Serwo</span><select data-ak="sv">' + opt(ioS.s.map(function(x){ return x.n; }), a.sv) + '</select></div>' +
+        rng('Pozycja po włączeniu', 'data-ak', 'a', a.a, 0, 180, 1, '°') + rng('Pozycja po wyłączeniu', 'data-ak', 'b', a.b, 0, 180, 1, '°');
+      if (a.t === 5) h += rng('Moc', 'data-ak', 'a', Math.max(20, Math.min(100, a.a)), 20, 100, 10, '%');
+      if (a.t >= 1 && a.t <= 4) h += '<div class="pinrow"><span>Też z kanału aparatury</span><select data-ak="ch">' + chOpts(a.ch) + '</select></div>';
+    }
+    return h + '</div>';
   }
 
   // zmiany w kartach serw i przycisków
   function utf8Cut(t, n){ while (new TextEncoder().encode(t).length > n) t = t.slice(0, -1); return t; }
-  menu.addEventListener('change', function(e){
+  function ioChange(e){
     var t = e.target, sk = t.dataset.sk, ak = t.dataset.ak;
     if (!sk && !ak) return;
     var card = t.closest(sk ? '[data-s]' : '[data-a]'), i = +(sk ? card.dataset.s : card.dataset.a), key = sk || ak, v, sendV;
@@ -1003,16 +1275,21 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     (sk ? ioS.s : ioS.a)[i][key] = v;
     send((sk ? 'S ' : 'A ') + i + ' ' + key + ' ' + sendV);
     if (sk && key === 'c'){ lookPos[i] = v; }
+    if (ak) renderLayout();           // nowy napis / funkcja przycisku od razu na ekranie
     ioReload();
-  });
-  menu.addEventListener('input', function(e){
+  }
+  menu.addEventListener('change', ioChange);
+  epanel.addEventListener('change', ioChange);
+  function ioInput(e){
     var t = e.target;
     if (t.type !== 'range' || !(t.dataset.sk || t.dataset.ak)) return;
     var sh = t.parentNode.querySelector('[data-u]');
     if (sh) sh.textContent = rngFmt(sh.dataset.u, +t.value);
     // podgląd na żywo: serwo jedzie za suwakiem zakresu / środka
     if (t.dataset.sk && /^(mn|mx|c)$/.test(t.dataset.sk)) send('S ' + t.closest('[data-s]').dataset.s + ' p ' + t.value);
-  });
+  }
+  menu.addEventListener('input', ioInput);
+  epanel.addEventListener('input', ioInput);
   menu.addEventListener('click', function(e){
     var k = e.target.dataset.test;
     if (!k) return;
@@ -1024,17 +1301,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
   // ---------- przyciski na ekranie ----------
   var actMaskNow = 0, turboPrev = null, turboIdx = -1;
-  function renderButtons(){
-    var h = '';
-    if (ioS) ioS.a.forEach(function(a, i){
-      if (a.t && a.sh) h += '<button data-b="' + i + '">' + esc(a.l || (a.t === 5 ? a.a + '%' : ACT_ICON[a.t])) + '</button>';
-    });
-    $('abtns').innerHTML = h;
-    markButtons();
-  }
   function markButtons(){
     if (!ioS) return;
-    var bs = document.querySelectorAll('#abtns [data-b]');
+    var bs = document.querySelectorAll('#lay [data-b]');
     for (var k = 0; k < bs.length; k++){
       var i = +bs[k].dataset.b, a = ioS.a[i];
       var on = a.t === 1 ? light : a.t === 6 ? turboIdx === i : a.t === 5 ? speed === a.a : !!((actMaskNow >> i) & 1);
@@ -1051,66 +1320,43 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     else send('B ' + i + ' ' + (down ? 1 : 0));
     markButtons();
   }
-  var abtns = document.getElementById('abtns'), heldBtn = {};
-  abtns.addEventListener('pointerdown', function(e){
-    var b = e.target.closest('[data-b]');
-    if (!b) return;
-    e.preventDefault(); e.stopPropagation();
-    try { b.setPointerCapture(e.pointerId); } catch (err) {}
-    heldBtn[e.pointerId] = +b.dataset.b;
-    pressAct(+b.dataset.b, true);
-  });
-  function btnUp(e){
-    if (heldBtn[e.pointerId] === undefined) return;
-    pressAct(heldBtn[e.pointerId], false);
-    delete heldBtn[e.pointerId];
-  }
-  abtns.addEventListener('pointerup', btnUp);
-  abtns.addEventListener('pointercancel', btnUp);
-
-  // ---------- rozglądanie: przeciąganie po obrazie steruje serwami pan / tilt ----------
-  var zm = document.getElementById('zm'), lookHud = document.getElementById('lookhud');
-  var lookPos = {}, lookDrag = null, lookSent = 0, lastTap = 0, LOOK_K = 0.3;   // stopnie na piksel
+  // ---------- pole kamery: przeciąganie steruje serwami pan / tilt ----------
+  var lookPos = {}, LOOK_K = 0.3;     // stopnie na piksel
   function lookServos(role){
     return ioS ? ioS.s.map(function(sv, i){ return { s: sv, i: i }; }).filter(function(x){ return x.s.ct === role && x.s.ok; }) : [];
   }
-  function updateLook(){
-    var on = lookServos(1).length + lookServos(2).length > 0;
-    if (document.body.classList.contains('look') !== on){
-      document.body.classList.toggle('look', on);
-      window.dispatchEvent(new Event('resize'));    // gałki wracają na środek swoich (węższych) stref
-    }
-    ioS.s.forEach(function(sv, i){ if (lookPos[i] === undefined) lookPos[i] = sv.pos; });
-  }
-  function lookSend(){
+  function lookSend(hud){
     lookServos(1).concat(lookServos(2)).forEach(function(x){ send('S ' + x.i + ' p ' + Math.round(lookPos[x.i])); });
-    lookSent = Date.now();
     var pan = lookServos(1)[0], tilt = lookServos(2)[0];
-    lookHud.textContent = (pan ? 'pan ' + Math.round(lookPos[pan.i]) + '°' : '') + (pan && tilt ? ' · ' : '') + (tilt ? 'tilt ' + Math.round(lookPos[tilt.i]) + '°' : '');
+    if (hud) hud.textContent = (pan ? 'pan ' + Math.round(lookPos[pan.i]) + '°' : '') + (pan && tilt ? ' · ' : '') +
+      (tilt ? 'tilt ' + Math.round(lookPos[tilt.i]) + '°' : '') || 'brak serw pan/tilt';
   }
-  zm.addEventListener('pointerdown', function(e){
-    e.preventDefault();
-    var now = Date.now();
-    if (now - lastTap < 300){          // dwuklik – kamera na środek
-      lookServos(1).concat(lookServos(2)).forEach(function(x){ lookPos[x.i] = x.s.c; });
-      lookSend();
-      lastTap = 0;
-      return;
-    }
-    lastTap = now;
-    try { zm.setPointerCapture(e.pointerId); } catch (err) {}
-    lookDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, start: Object.assign({}, lookPos) };
-  });
-  zm.addEventListener('pointermove', function(e){
-    if (!lookDrag || e.pointerId !== lookDrag.id) return;
-    var dx = (e.clientX - lookDrag.x) * LOOK_K, dy = (e.clientY - lookDrag.y) * LOOK_K;
-    lookServos(1).forEach(function(x){ lookPos[x.i] = Math.max(x.s.mn, Math.min(x.s.mx, lookDrag.start[x.i] + dx)); });
-    lookServos(2).forEach(function(x){ lookPos[x.i] = Math.max(x.s.mn, Math.min(x.s.mx, lookDrag.start[x.i] - dy)); });
-    if (Date.now() - lookSent > 40) lookSend();
-  });
-  function lookEnd(e){ if (lookDrag && e.pointerId === lookDrag.id){ lookSend(); lookDrag = null; } }
-  zm.addEventListener('pointerup', lookEnd);
-  zm.addEventListener('pointercancel', lookEnd);
+  function bindPad(el){
+    var hud = el.querySelector('.padhud'), drag = null, lastTap = 0, sent = 0;
+    el.addEventListener('pointerdown', function(e){
+      e.preventDefault();
+      var now = Date.now();
+      if (now - lastTap < 300){        // dwuklik – kamera na środek
+        lookServos(1).concat(lookServos(2)).forEach(function(x){ lookPos[x.i] = x.s.c; });
+        lookSend(hud);
+        lastTap = 0;
+        return;
+      }
+      lastTap = now;
+      try { el.setPointerCapture(e.pointerId); } catch (err) {}
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, start: Object.assign({}, lookPos) };
+    });
+    el.addEventListener('pointermove', function(e){
+      if (!drag || e.pointerId !== drag.id) return;
+      var dx = (e.clientX - drag.x) * LOOK_K, dy = (e.clientY - drag.y) * LOOK_K;
+      lookServos(1).forEach(function(x){ lookPos[x.i] = Math.max(x.s.mn, Math.min(x.s.mx, drag.start[x.i] + dx)); });
+      lookServos(2).forEach(function(x){ lookPos[x.i] = Math.max(x.s.mn, Math.min(x.s.mx, drag.start[x.i] - dy)); });
+      if (Date.now() - sent > 40){ lookSend(hud); sent = Date.now(); }
+    });
+    function end(e){ if (drag && e.pointerId === drag.id){ lookSend(hud); drag = null; } }
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
 
   // ---------- schemat połączeń ----------
   // Układ pinów płytki ESP32-CAM (AI-Thinker), widok od strony kamery
@@ -1457,11 +1703,12 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   var SV_KEYS = ['n', 'o', 'mn', 'mx', 'c', 'inv', 'sp', 'ct', 'ch'], ACT_KEYS = ['t', 'm', 'o', 'sv', 'a', 'b', 'ch', 'sh', 'l'];
   function getJson(u){ return fetch(u, { cache: 'no-store' }).then(function(r){ return r.json(); }); }
   $('bkdown').addEventListener('click', function(){
-    Promise.all([getJson('/settings'), getJson('/hw'), getJson('/wifi'), getJson('/sys'), getJson('/io')]).then(function(r){
+    Promise.all([getJson('/settings'), getJson('/hw'), getJson('/wifi'), getJson('/sys'), getJson('/io'), getJson('/layout')]).then(function(r){
       var out = { app: 'esp32-cam-robot', ver: r[3].ver, cam: {}, hw: { p: r[1].p, inv: r[1].inv, c: r[1].c }, wifi: {} };
       CAM_KEYS.forEach(function(k){ out.cam[k] = r[0][k]; });
       HW_KEYS.forEach(function(k){ out.hw[k] = r[1][k]; });
       ['mode', 'keep', 'ch', 'as', 'ss', 'hn'].forEach(function(k){ out.wifi[k] = r[2][k]; });
+      if (r[5] && r[5].land) out.layout = r[5];
       out.io = {
         s: r[4].s.map(function(x){ var o = {}; SV_KEYS.forEach(function(k){ o[k] = x[k]; }); return o; }),
         a: r[4].a.map(function(x){ var o = {}; ACT_KEYS.forEach(function(k){ o[k] = x[k]; }); return o; })
@@ -1480,6 +1727,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     f.text().then(function(t){
       var d = JSON.parse(t);
       if (d.app !== 'esp32-cam-robot' || !d.cam || !d.hw) throw new Error();
+      // układ ekranu najpierw (osobne żądanie), potem ustawienia i restart
+      return fetch('/layout', { method: 'POST', body: JSON.stringify(d.layout && d.layout.land ? d.layout : {}) }).then(function(){ return d; });
+    }).then(function(d){
       CAM_KEYS.forEach(function(k){ if (d.cam[k] !== undefined) send('C ' + k + ' ' + d.cam[k]); });
       HW_KEYS.forEach(function(k){ if (d.hw[k] !== undefined) send('H ' + k + ' ' + d.hw[k]); });
       (d.hw.p || []).forEach(function(v, i){ send('H p' + i + ' ' + v); });

@@ -1,5 +1,12 @@
 Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu (dwie gałki na ekranie + podgląd z kamery) oraz opcjonalnie z aparatury ExpressLRS.
 
+## Co nowego w v1.5.0
+
+- **edytor układu ekranu** jak w emulatorach gier: przesuwanie elementów palcem, zmiana rozmiaru (suwak albo dwa palce), przezroczystość, osobne układy dla telefonu trzymanego poziomo i pionowo; układ zapisuje się w robocie
+- **gałki z przypisywanymi funkcjami osi**: skręt, gaz, jazda bokiem, kamera pan/tilt albo dowolne serwo; pływające albo stałe; z powrotem na środek albo bez (tempomat, kamera zostaje w miejscu)
+- przyciski, pole kamery, światło i moc to elementy układu – dodajesz, przesuwasz i ustawiasz ich funkcję w edytorze
+- kopia ustawień obejmuje układ ekranu
+
 ## Co nowego w v1.4.0
 
 - **serwa** (do 6): zakres, środek, odwrócenie, prędkość; sterowanie przeciąganiem obrazu (kamera pan/tilt, dwuklik = środek), kanałem aparatury albo przyciskami

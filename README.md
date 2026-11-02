@@ -8,7 +8,8 @@ Robot sterowany z telefonu przez przeglądarkę: obraz z kamery na pełnym ekran
 
 - ESP32 tworzy własną sieć Wi-Fi **`ESP32-Robot`** (hasło `robot1234`).
 - Na telefonie łączysz się z tą siecią i otwierasz **http://192.168.4.1**.
-- Sterujesz dwoma kciukami, jak w grach wyścigowych. **Lewa połowa ekranu to gaz** (góra = przód, dół = tył), **prawa połowa to skręt** (lewo/prawo). Gałka pojawia się tam, gdzie dotkniesz. Skręt bez gazu obraca robota w miejscu.
+- Domyślnie sterujesz dwoma kciukami, jak w grach wyścigowych: **lewa gałka to gaz** (góra = przód, dół = tył), **prawa to skręt** (lewo/prawo). Skręt bez gazu obraca robota w miejscu.
+- **Układ ekranu ustawiasz sam**, jak w emulatorach gier: ⚙ → Przyciski (albo Napęd) → „Edytuj układ ekranu”. Szczegóły są niżej.
 - Na górze ekranu są przycisk światła (dioda flash) i regulacja mocy (20–100%).
 - Przycisk **⚙** otwiera **menu ustawień obrazu**. Ustawienia zapisują się w pamięci robota i zostają po wyłączeniu:
   - szybki wybór: **Płynnie** (320×240), **Balans** (640×480), **Jakość** (800×600);
@@ -142,13 +143,33 @@ Sterowanie Mecanum z telefonu: **lewa gałka jest okrągła** (przód/tył i jaz
 1. Do przodu: wszystkie 4 koła kręcą się do przodu. Jeśli któreś kręci się odwrotnie, zaznacz je w menu „Odwróć kierunek”.
 2. Bokiem: koła po przekątnej (lewe przednie i prawe tylne, prawe przednie i lewe tylne) kręcą się w tę samą stronę, a przednie i tylne po tej samej stronie w przeciwne. Jeśli na podłodze robot jedzie bokiem w złą stronę albo zamiast bokiem jedzie do przodu, zamień miejscami koła przednie z tylnymi, bo rolki muszą tworzyć właściwy wzór.
 
+## Edytor układu ekranu
+
+W ⚙ → Przyciski → **„Edytuj układ ekranu”** elementy na ekranie dostają ramki:
+- **przesuwasz** je palcem;
+- **dotknięcie** otwiera panel z rozmiarem i funkcją;
+- **rozmiar** zmienisz też dwoma palcami.
+
+Pasek u góry ma przyciski: dodaj gałkę, przycisk, pole kamery, światło, moc; krycie elementów; układ domyślny; „Gotowe”. „Gotowe” zapisuje układ w robocie, więc działa na każdym telefonie.
+
+Robot przechowuje **dwa osobne układy: poziomy i pionowy**. Obróć telefon, żeby ustawić drugi.
+
+- **Gałka:**
+  - **funkcja każdej osi osobno:** lewo/prawo: skręt, jazda bokiem (Mecanum), kamera pan albo dowolne serwo; góra/dół: gaz, kamera tilt albo dowolne serwo;
+  - **kształt dobiera się sam:** jedna oś to tor, dwie osie to okrągła gałka;
+  - **pływająca** (pojawia się pod palcem) albo stała;
+  - **powrót na środek:** bez powrotu gaz działa jak tempomat, a kamera zostaje tam, gdzie ją ustawisz.
+- **Przycisk:** funkcję wybierasz od razu w panelu (te same funkcje co w zakładce Przyciski).
+- **Pole kamery:** przeciąganie palcem obraca kamerę na serwach pan/tilt, dwuklik ją centruje.
+- **Światło i moc:** można je przesunąć, zmienić ich rozmiar albo usunąć.
+
 ## Serwa, PCA9685 i własne przyciski
 
 **Serwa** (menu ⚙ → Serwa), np. kamera na uchwycie pan/tilt, chwytak albo ramię:
 - Do 6 serw: 2 na pinach ESP32 (zwykle U0T/U0R albo IO2, jeśli nie ma ELRS), reszta na module PCA9685.
 - Każde ma nazwę, zakres ruchu (min/max), środek, odwrócenie, prędkość ruchu i przyciski testowe.
 - **Sterowanie:**
-  - **Przeciąganie obrazu:** serwo z rolą *pan* albo *tilt*. Na ekranie między gałkami pojawia się pas: przesuń palcem, żeby obrócić kamerę. Dwuklik ją centruje.
+  - **Przeciąganie obrazu:** serwo z rolą *pan* albo *tilt* jest sterowane polem kamery (element układu) albo gałką z osią „kamera – pan/tilt”. Pole kamery pojawia się w układzie domyślnym samo.
   - **Kanał aparatury:** np. pokrętło albo suwak w nadajniku.
   - **Tylko przyciski.**
 - Serwa zasilaj z przetwornicy 5 V (min. 2 A), nie ze stabilizatora L298N. Każde serwo pobiera chwilowo do 0,7 A.
@@ -158,7 +179,7 @@ Sterowanie Mecanum z telefonu: **lewa gałka jest okrągła** (przód/tył i jaz
 - Częstotliwość PWM jest wspólna dla wszystkich kanałów. Zwykłe serwa potrzebują 50 Hz.
 - Silniki na kanałach PCA działają z tą samą częstotliwością co serwa (np. 50 Hz). Jadą, ale mogą buczeć.
 
-**Własne przyciski** (menu ⚙ → Przyciski). Do 8 przycisków w prawym górnym rogu ekranu. Każdy ma swój napis (może być emoji) i jedną z funkcji:
+**Własne przyciski** (menu ⚙ → Przyciski). Do 8 przycisków. Na ekran dodajesz je w edytorze układu. Każdy ma swój napis (może być emoji) i jedną z funkcji:
 - **Światło:** włącza i wyłącza diodę.
 - **Wyjście:** włącza i wyłącza pin ESP32 albo kanał PCA, np. dodatkowe światła, buzzer albo przekaźnik przez moduł z tranzystorem. Działa jako przełącznik albo tylko na przytrzymanie.
 - **Serwo:** ustawia serwo w pozycji A, a po wyłączeniu w pozycji B, np. otwiera i zamyka chwytak.
