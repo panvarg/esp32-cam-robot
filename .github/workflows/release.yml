@@ -26,6 +26,9 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32@3.0.7
 
+      - name: Set firmware version
+        run: echo '#define FW_VERSION "${{ inputs.version }}"' > esp32_cam_robot/version.h
+
       - name: Compile
         run: |
           arduino-cli compile \

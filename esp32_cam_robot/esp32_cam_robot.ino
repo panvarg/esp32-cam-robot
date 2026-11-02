@@ -4,7 +4,7 @@
  *  - ESP32 tworzy własną sieć Wi-Fi lub łączy się z domową (menu ⚙ → Wi-Fi)
  *  - strona www z wirtualnym analogiem (joystick jak w grach) + podgląd z kamery
  *  - sterowanie przez WebSocket (niskie opóźnienia), obraz MJPEG na porcie 81
- *  - failsafe: silniki stają, gdy przez FAILSAFE_MS nie przyjdzie żadna komenda
+ *  - failsafe: silniki stają, gdy przez ustawiony czas nie przyjdzie żadna komenda
  *  - opcjonalnie odbiornik ExpressLRS (CRSF) – aparatura ma pierwszeństwo,
  *    gdy jest połączona i uzbrojona; w pozostałych przypadkach steruje telefon
  *  - napęd czołgowy (2 lub 4 silniki) albo Mecanum (4 silniki, 8 pinów);
@@ -17,12 +17,21 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <ESPmDNS.h>
+#include <Update.h>
+#include "esp_ota_ops.h"
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
 #include "driver/uart.h"
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
+
+#if __has_include("version.h")
+#include "version.h"                     // tworzony przy wydaniu (GitHub Actions)
+#endif
+#ifndef FW_VERSION
+#define FW_VERSION "dev"
+#endif
 
 #include "camera_pins.h"
 #include "index_html.h"
@@ -39,23 +48,13 @@
 // Konfiguracja jest zapisywana w pamięci ESP; domyślne wartości są w HW_DEFAULTS niżej.
 // Zworki ENA i ENB na L298N ZAŁOŻONE – prędkość regulujemy PWM-em na pinach INx.
 
-// Dioda flash
-#define LIGHT_DUTY  60   // jasność 0..255 (pełna moc mocno grzeje i oślepia)
-
 // Domyślne odbicie obrazu (później można je zmienić w menu ustawień na stronie)
 #define CAM_VFLIP   false
 #define CAM_HMIRROR false
 
-#define PWM_FREQ     1000  // Hz – dla L298N 500..2000 Hz działa dobrze
 #define PWM_RES      8     // rozdzielczość 8 bit -> 0..255
-#define FAILSAFE_MS  600   // stop, gdy brak komend przez tyle ms
-
-// Aparatura (przypisanie kanałów jest w menu ELRS)
-#define RC_MIN_SPEED    25   // moc przy gazie na dole, %
-#define RC_DEFAULT_SPEED 70  // moc, gdy kanał mocy nie jest przypisany, %
-#define RC_TURN_GAIN    75   // czułość skrętu, %
-#define RC_DEADBAND     5    // martwa strefa drążków, %
-#define RC_TIMEOUT_MS   250  // brak ramek przez tyle ms = brak połączenia
+#define RC_DEFAULT_SPEED 70  // moc z aparatury, gdy kanał mocy nie jest przypisany, %
+// Pozostałe parametry jazdy, diody i aparatury są w menu (HW_DEFAULTS niżej)
 
 // ============================================================
 
@@ -63,7 +62,7 @@
 // Wolne piny ESP32-CAM (AI-Thinker); reszta jest zajęta przez kamerę i PSRAM.
 static const int8_t FREE_PINS[] = { 1, 2, 3, 4, 12, 13, 14, 15 };
 
-#define HW_SETTINGS_VERSION 1
+#define HW_SETTINGS_VERSION 2
 #define MODE_TANK    0
 #define MODE_MECANUM 1
 // Funkcje kanałów aparatury (indeksy w HwSettings::ch)
@@ -80,7 +79,20 @@ struct HwSettings {
   int8_t  lightPin;  // -1 = brak
   int8_t  rcPin;     // -1 = brak odbiornika
   int8_t  ch[RCF_COUNT];  // numer kanału 1..16, 0 = nieprzypisany
+  // --- od wersji 2 (nowe pola zawsze na końcu – starsze zapisy dostają tu wartości domyślne) ---
+  int16_t pwmFreq;    // częstotliwość PWM silników, Hz (po restarcie)
+  int16_t failsafeMs; // stop, gdy z telefonu nie przychodzą komendy przez tyle ms
+  int16_t rcTimeout;  // brak ramek z odbiornika przez tyle ms = brak połączenia
+  uint16_t rcRev;     // odwrócone kanały aparatury, bit 0 = CH1
+  uint8_t turnGain;   // czułość skrętu / obrotu, %
+  uint8_t maxPower;   // ograniczenie mocy kół, %
+  uint8_t accel;      // płynny rozruch: czas od 0 do 100% mocy w 0,1 s (0 = wyłączony)
+  uint8_t lightPct;   // jasność diody, %
+  uint8_t stickDz;    // martwa strefa gałek na telefonie, %
+  uint8_t rcDz;       // martwa strefa drążków aparatury, %
+  uint8_t rcMinSpeed; // moc z aparatury przy gazie na dole, %
 };
+#define HW_V1_SIZE offsetof(HwSettings, pwmFreq)
 static const HwSettings HW_DEFAULTS = {
   HW_SETTINGS_VERSION, MODE_TANK, 2,
   { 14, 15, 13, 12, 2, 4, 1, 3 },
@@ -88,7 +100,18 @@ static const HwSettings HW_DEFAULTS = {
   90,
   4,    // dioda flash na płytce
   2,    // TX odbiornika ELRS
-  { 1, 2, 4, 3, 5, 6 }   // skręt CH1, jazda CH2, bok CH4, moc CH3 (gaz), uzbrojenie CH5, światło CH6
+  { 1, 2, 4, 3, 5, 6 },  // skręt CH1, jazda CH2, bok CH4, moc CH3 (gaz), uzbrojenie CH5, światło CH6
+  1000,  // PWM Hz – dla L298N 500..2000 Hz działa dobrze
+  600,   // failsafe telefonu, ms
+  250,   // utrata sygnału aparatury, ms
+  0,     // brak odwróconych kanałów
+  75,    // czułość skrętu, %
+  100,   // maks. moc, %
+  0,     // płynny rozruch wyłączony
+  25,    // jasność diody, % (pełna moc mocno grzeje i oślepia)
+  8,     // martwa strefa gałek, %
+  5,     // martwa strefa aparatury, %
+  25     // moc z aparatury przy gazie na dole, %
 };
 static HwSettings hw = HW_DEFAULTS;   // edytowane z menu
 static HwSettings hwBoot;             // aktywne od startu (piny i tryb zmieniają się po restarcie)
@@ -116,7 +139,6 @@ static volatile int targetY = 0;            // -100..100 (przód/tył)
 static volatile int targetS = 0;            // -100..100 (jazda bokiem, tylko Mecanum)
 static volatile unsigned long lastCmdMs = 0;
 static volatile bool lightOn = false;
-static bool lightApplied = false;
 
 // Stan aparatury: 0 = brak, 1 = połączona (steruje telefon), 2 = uzbrojona (steruje aparatura)
 static volatile uint8_t rcState = 0;
@@ -135,7 +157,7 @@ static const framesize_t FRAME_SIZES[] = {
 };
 #define FRAME_SIZE_COUNT (int)(sizeof(FRAME_SIZES) / sizeof(FRAME_SIZES[0]))
 
-#define CAM_SETTINGS_VERSION 1
+#define CAM_SETTINGS_VERSION 2
 struct CamSettings {
   int8_t  ver;
   int8_t  fs;   // rozdzielczość (indeks FRAME_SIZES)
@@ -151,9 +173,17 @@ struct CamSettings {
   int8_t  hm;   // odbicie lustrzane 0/1
   int8_t  vf;   // odwrócenie w pionie 0/1
   int16_t rot;  // obrót w przeglądarce: 0, 90, 180, 270
+  // --- od wersji 2 (nowe pola na końcu – starsze zapisy dostają tu wartości domyślne) ---
+  int8_t  xclk; // taktowanie kamery, MHz: 20 lub 10 (mniej zakłóceń, mniej klatek)
+  int8_t  gc;   // limit wzmocnienia 0..6 (2x..128x), -1 = domyślny czujnika
+  int8_t  bpc;  // korekcja „martwych” (czarnych) pikseli
+  int8_t  wpc;  // korekcja „gorących” (białych) pikseli
+  int8_t  lenc; // korekcja winietowania obiektywu
 };
+#define CAM_V1_SIZE offsetof(CamSettings, xclk)
 static const CamSettings CAM_DEFAULTS = {
-  CAM_SETTINGS_VERSION, 2, 12, 0, 0, 0, 0, 1, 0, 300, 0, CAM_HMIRROR, CAM_VFLIP, 0
+  CAM_SETTINGS_VERSION, 2, 12, 0, 0, 0, 0, 1, 0, 300, 0, CAM_HMIRROR, CAM_VFLIP, 0,
+  20, -1, 0, 1, 1     // wartości jak po starcie czujnika OV2640
 };
 static CamSettings cam = CAM_DEFAULTS;
 static volatile bool camDirty = false;
@@ -169,6 +199,8 @@ static volatile int streamKB = 0;          // średni rozmiar klatki w KB
 // jest uruchamiana ponownie z większym buforem – w loop(), pod mutexem.
 #define FS_BASE_INIT 3                     // indeks FRAMESIZE_SVGA w FRAME_SIZES
 static int camInitFs = -1;
+static int camInitXclk = 0;
+static volatile bool camForceReinit = false;   // przywrócenie ustawień czujnika (np. limit wzmocnienia na „domyślny”)
 static volatile bool camNeedReinit = false;
 static volatile bool camPause = false;     // strumień nie bierze nowych klatek (restart kamery)
 static SemaphoreHandle_t camMutex = NULL;
@@ -225,13 +257,30 @@ static bool hwValid(const HwSettings &h) {
   return true;
 }
 
+// Zakresy nowych parametrów – poza zakresem zostają przycięte, nie odrzucamy całości
+static void hwClamp(HwSettings &h) {
+  h.pwmFreq = constrain(h.pwmFreq, 100, 20000);
+  h.failsafeMs = constrain(h.failsafeMs, 200, 3000);
+  h.rcTimeout = constrain(h.rcTimeout, 100, 2000);
+  h.turnGain = constrain(h.turnGain, 20, 100);
+  h.maxPower = constrain(h.maxPower, 20, 100);
+  h.accel = constrain(h.accel, 0, 30);
+  h.lightPct = constrain(h.lightPct, 1, 100);
+  h.stickDz = constrain(h.stickDz, 0, 30);
+  h.rcDz = constrain(h.rcDz, 0, 30);
+  h.rcMinSpeed = constrain(h.rcMinSpeed, 0, 100);
+}
+
 static void hwLoad() {
   prefs.begin("hw", true);
-  HwSettings tmp;
-  if (prefs.getBytesLength("s") == sizeof(tmp) &&
-      prefs.getBytes("s", &tmp, sizeof(tmp)) == sizeof(tmp) && hwValid(tmp)) {
+  HwSettings tmp = HW_DEFAULTS;
+  size_t len = prefs.getBytesLength("s");
+  if (len > 0 && len <= sizeof(tmp)) prefs.getBytes("s", &tmp, len);
+  if (len == HW_V1_SIZE && tmp.ver == 1) tmp.ver = HW_SETTINGS_VERSION;   // zapis z v1.2: nowe pola domyślne
+  if (len > 0 && hwValid(tmp)) {
+    hwClamp(tmp);
     hw = tmp;
-  } else if (prefs.getBytesLength("s") > 0) {
+  } else if (len > 0) {
     Serial.println("Bledna konfiguracja napedu - uzywam domyslnej");
   }
   prefs.end();
@@ -281,26 +330,34 @@ static void normalize(int *w, int n) {
 
 static volatile int wheelOut[4];   // ostatnia moc kół w % (do podglądu na stronie)
 
-// x – skręt/obrót, y – przód/tył, s – jazda bokiem (Mecanum); wszystko -100..100
-static void drive(int x, int y, int s = 0) {
-  if (hwBoot.mode == MODE_MECANUM) {
+static float wheelCur[4];          // aktualna moc kół (z płynnym rozruchem), %
+
+// x – skręt/obrót, y – przód/tył, s – jazda bokiem (Mecanum); wszystko -100..100.
+// now = true: bez płynnego rozruchu (failsafe, restart kamery).
+static void drive(int x, int y, int s = 0, bool now = false) {
+  static unsigned long lastMs = 0;
+  unsigned long t = millis();
+  float step = hw.accel ? (t - lastMs) / (float)hw.accel : 1000;   // % na ms: 100% w accel*100 ms
+  lastMs = t;
+  x = x * hw.turnGain / 100;
+
+  int n = hwBoot.mode == MODE_MECANUM ? 4 : 2;
+  int w[4] = { 0, 0, 0, 0 };
+  if (n == 4) {
     // kolejność: lewe przednie, prawe przednie, lewe tylne, prawe tylne
-    int w[4] = { y + s + x, y - s - x, y - s + x, y + s - x };
-    normalize(w, 4);
-    for (int i = 0; i < 4; i++) {
-      wheelOut[i] = w[i];
-      setMotor(i, toDuty(hw.inv[i] ? -w[i] : w[i]));
-    }
+    w[0] = y + s + x; w[1] = y - s - x; w[2] = y - s + x; w[3] = y + s - x;
   } else {
     // "arcade drive": skręt czołgowy, lewa i prawa strona
-    int w[2] = { y + x, y - x };
-    normalize(w, 2);
-    for (int i = 0; i < 2; i++) {
-      wheelOut[i] = w[i];
-      setMotor(i, toDuty(hw.inv[i] ? -w[i] : w[i]));
-    }
-    wheelOut[2] = 0;
-    wheelOut[3] = 0;
+    w[0] = y + x; w[1] = y - x;
+  }
+  normalize(w, n);
+  for (int i = 0; i < 4; i++) {
+    float target = i < n ? w[i] * hw.maxPower / 100.0f : 0;
+    if (now) wheelCur[i] = target;
+    else wheelCur[i] += constrain(target - wheelCur[i], -step, step);
+    int v = (int)roundf(wheelCur[i]);
+    wheelOut[i] = v;
+    if (i < n) setMotor(i, toDuty(hw.inv[i] ? -v : v));
   }
 }
 
@@ -308,9 +365,9 @@ static void motorsInit() {
   for (int i = 0; i < motorPinCount(hwBoot); i++) {
     pinMode(hwBoot.pin[i], OUTPUT);
     digitalWrite(hwBoot.pin[i], LOW);
-    pwmAttach(hwBoot.pin[i], MOTOR_CH[i], PWM_FREQ);
+    pwmAttach(hwBoot.pin[i], MOTOR_CH[i], hwBoot.pwmFreq);
   }
-  drive(0, 0);
+  drive(0, 0, 0, true);
 
   if (lightActive) {
     pwmAttach(hwBoot.lightPin, CH_LIGHT, 5000);
@@ -328,9 +385,21 @@ static bool hwSet(const char *key, int v) {
   else if (!strcmp(key, "lp"))   hw.lightPin = isFreePin(v) ? v : -1;
   else if (!strcmp(key, "rp"))   hw.rcPin = isFreePin(v) ? v : -1;
   else if (key[0] == 'c' && key[1] >= '0' && key[1] < '0' + RCF_COUNT && !key[2]) hw.ch[key[1] - '0'] = constrain(v, 0, 16);
+  else if (!strcmp(key, "pf"))   hw.pwmFreq = v;
+  else if (!strcmp(key, "fo"))   hw.failsafeMs = v;
+  else if (!strcmp(key, "rt"))   hw.rcTimeout = v;
+  else if (!strcmp(key, "rv"))   hw.rcRev = v & 0xFFFF;
+  else if (!strcmp(key, "tg"))   hw.turnGain = v;
+  else if (!strcmp(key, "mp"))   hw.maxPower = v;
+  else if (!strcmp(key, "ac"))   hw.accel = constrain(v, 0, 30);
+  else if (!strcmp(key, "lt"))   hw.lightPct = constrain(v, 1, 100);
+  else if (!strcmp(key, "dz"))   hw.stickDz = constrain(v, 0, 30);
+  else if (!strcmp(key, "rd"))   hw.rcDz = constrain(v, 0, 30);
+  else if (!strcmp(key, "rm"))   hw.rcMinSpeed = constrain(v, 0, 100);
   else if (!strcmp(key, "reset")) hw = HW_DEFAULTS;
   else if (!strcmp(key, "reboot")) { rebootRequested = true; return true; }
   else return false;
+  hwClamp(hw);
   hwDirty = true;
   hwDirtyMs = millis();
   return true;
@@ -338,7 +407,8 @@ static bool hwSet(const char *key, int v) {
 
 // Czy zmiany w menu wymagają restartu (piny, tryb napędu, piny diody / odbiornika)
 static bool hwPending() {
-  if (hw.mode != hwBoot.mode || hw.lightPin != hwBoot.lightPin || hw.rcPin != hwBoot.rcPin) return true;
+  if (hw.mode != hwBoot.mode || hw.lightPin != hwBoot.lightPin || hw.rcPin != hwBoot.rcPin ||
+      hw.pwmFreq != hwBoot.pwmFreq) return true;
   for (int i = 0; i < 8; i++) if (hw.pin[i] != hwBoot.pin[i]) return true;
   return false;
 }
@@ -375,6 +445,10 @@ static void camApplyAll() {
   if (cam.fx != a.fx)    s->set_special_effect(s, cam.fx);
   if (cam.hm != a.hm)    s->set_hmirror(s, cam.hm);
   if (cam.vf != a.vf)    s->set_vflip(s, cam.vf);
+  if (cam.gc != a.gc && cam.gc >= 0) s->set_gainceiling(s, (gainceiling_t)cam.gc);
+  if (cam.bpc != a.bpc)  s->set_bpc(s, cam.bpc);
+  if (cam.wpc != a.wpc)  s->set_wpc(s, cam.wpc);
+  if (cam.lenc != a.lenc) s->set_lenc(s, cam.lenc);
   a = cam;
   a.fs = fs;
 }
@@ -394,9 +468,22 @@ static bool camSet(const char *key, int v) {
   else if (!strcmp(key, "hm")) cam.hm = v ? 1 : 0;
   else if (!strcmp(key, "vf")) cam.vf = v ? 1 : 0;
   else if (!strcmp(key, "rot")) cam.rot = ((v / 90) & 3) * 90;
-  else if (!strcmp(key, "reset")) cam = CAM_DEFAULTS;
+  else if (!strcmp(key, "xc")) cam.xclk = v == 10 ? 10 : 20;
+  else if (!strcmp(key, "gc")) {
+    int nv = constrain(v, -1, 6);
+    if (nv == -1 && cam.gc != -1) camForceReinit = true;   // „domyślny” = świeży start czujnika
+    cam.gc = nv;
+  }
+  else if (!strcmp(key, "bpc")) cam.bpc = v ? 1 : 0;
+  else if (!strcmp(key, "wpc")) cam.wpc = v ? 1 : 0;
+  else if (!strcmp(key, "lenc")) cam.lenc = v ? 1 : 0;
+  else if (!strcmp(key, "reset")) { cam = CAM_DEFAULTS; camForceReinit = true; }
   else return false;
-  if (camWantedInitFs() != camInitFs) camNeedReinit = true;   // inny bufor -> restart kamery w loop()
+  // inny bufor, taktowanie albo powrót do ustawień czujnika -> restart kamery w loop()
+  if (camWantedInitFs() != camInitFs || cam.xclk != camInitXclk || camForceReinit) {
+    camForceReinit = false;
+    camNeedReinit = true;
+  }
   camApplyAll();
   camDirty = true;                    // zapis do pamięci w loop(), z opóźnieniem
   camDirtyMs = millis();
@@ -405,10 +492,12 @@ static bool camSet(const char *key, int v) {
 
 static void camLoad() {
   prefs.begin("cam", true);
-  CamSettings tmp;
-  if (prefs.getBytesLength("s") == sizeof(tmp) &&
-      prefs.getBytes("s", &tmp, sizeof(tmp)) == sizeof(tmp) &&
-      tmp.ver == CAM_SETTINGS_VERSION) {
+  CamSettings tmp = CAM_DEFAULTS;
+  size_t len = prefs.getBytesLength("s");
+  if (len > 0 && len <= sizeof(tmp)) prefs.getBytes("s", &tmp, len);
+  if (len == CAM_V1_SIZE && tmp.ver == 1) tmp.ver = CAM_SETTINGS_VERSION;   // zapis z v1.1/v1.2
+  if (len > 0 && tmp.ver == CAM_SETTINGS_VERSION) {
+    if (tmp.xclk != 10) tmp.xclk = 20;
     cam = tmp;
   }
   prefs.end();
@@ -508,18 +597,23 @@ static void rcPoll() {
   }
 }
 
-static int rcRaw(int ch) { return ch >= 1 && ch <= 16 ? rcCh[ch - 1] : CRSF_MID; }
+// Wartość kanału z uwzględnieniem odwrócenia (lustrzane odbicie wokół środka)
+static int rcRaw(int ch) {
+  if (ch < 1 || ch > 16) return CRSF_MID;
+  int v = rcCh[ch - 1];
+  return (hw.rcRev >> (ch - 1)) & 1 ? 2 * CRSF_MID - v : v;
+}
 
 static int rcAxis(int ch) {               // -100..100 %
   if (ch == 0) return 0;
   int v = constrain((rcRaw(ch) - CRSF_MID) * 100 / CRSF_SPAN, -100, 100);
-  return abs(v) < RC_DEADBAND ? 0 : v;
+  return abs(v) < hw.rcDz ? 0 : v;
 }
 
 static bool rcSwitch(int ch) { return ch != 0 && rcRaw(ch) > 1300; }   // > ~1700 us
 
 static bool rcConnected() {
-  return rcActive && rcHaveFrame && rcLinkQuality > 0 && millis() - rcLastFrameMs < RC_TIMEOUT_MS;
+  return rcActive && rcHaveFrame && rcLinkQuality > 0 && millis() - rcLastFrameMs < (unsigned long)hw.rcTimeout;
 }
 
 static void rcUpdate() {
@@ -536,14 +630,14 @@ static void rcUpdate() {
   int speed = RC_DEFAULT_SPEED;
   if (hw.ch[RCF_SPEED]) {
     int pct = constrain((rcRaw(hw.ch[RCF_SPEED]) - 172) * 100 / 1639, 0, 100);
-    speed = RC_MIN_SPEED + pct * (100 - RC_MIN_SPEED) / 100;
+    speed = hw.rcMinSpeed + pct * (100 - hw.rcMinSpeed) / 100;
   }
 
   // Uzbrojenie tylko przy drążku w środku – robot nie wystrzeli po przełączeniu AUX
   if (!rcSwitch(hw.ch[RCF_ARM])) rcArmLatched = false;
   else if (!rcArmLatched && abs(turn) < 10 && abs(fwd) < 10 && abs(side) < 10) rcArmLatched = true;
 
-  rcX = turn * speed / 100 * RC_TURN_GAIN / 100;
+  rcX = turn * speed / 100;           // czułość skrętu stosuje drive()
   rcY = fwd * speed / 100;
   rcS = side * speed / 100;
   rcState = rcArmLatched ? 2 : 1;
@@ -569,6 +663,8 @@ static void rcUpdate() {
 static void wifiSet(const char *key, const char *val);
 static esp_err_t wifiHandler(httpd_req_t *req);
 static esp_err_t scanHandler(httpd_req_t *req);
+static esp_err_t sysHandler(httpd_req_t *req);
+static esp_err_t updateHandler(httpd_req_t *req);
 
 static void handleCommand(const char *cmd) {
   int a = 0, b = 0, c = 0;
@@ -617,12 +713,13 @@ static esp_err_t indexHandler(httpd_req_t *req) {
 
 // Aktualne ustawienia obrazu jako JSON – strona pobiera je przy starcie
 static esp_err_t settingsHandler(httpd_req_t *req) {
-  char json[256];
+  char json[320];
   snprintf(json, sizeof(json),
            "{\"fs\":%d,\"q\":%d,\"br\":%d,\"ct\":%d,\"sa\":%d,\"wb\":%d,\"ae\":%d,"
-           "\"al\":%d,\"ex\":%d,\"fx\":%d,\"hm\":%d,\"vf\":%d,\"rot\":%d,\"psram\":%d}",
+           "\"al\":%d,\"ex\":%d,\"fx\":%d,\"hm\":%d,\"vf\":%d,\"rot\":%d,"
+           "\"xc\":%d,\"gc\":%d,\"bpc\":%d,\"wpc\":%d,\"lenc\":%d,\"psram\":%d}",
            cam.fs, cam.q, cam.br, cam.ct, cam.sa, cam.wb, cam.ae, cam.al, cam.ex, cam.fx,
-           cam.hm, cam.vf, cam.rot, hasPsram ? 1 : 0);
+           cam.hm, cam.vf, cam.rot, cam.xclk, cam.gc, cam.bpc, cam.wpc, cam.lenc, hasPsram ? 1 : 0);
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
@@ -630,15 +727,19 @@ static esp_err_t settingsHandler(httpd_req_t *req) {
 
 // Konfiguracja napędu i aparatury jako JSON (menu "Napęd" / "ELRS")
 static esp_err_t hwHandler(httpd_req_t *req) {
-  char json[400];
+  char json[600];
   const HwSettings &h = hw;
   snprintf(json, sizeof(json),
            "{\"mode\":%d,\"mot\":%d,\"p\":[%d,%d,%d,%d,%d,%d,%d,%d],\"inv\":[%d,%d,%d,%d],"
            "\"md\":%d,\"lp\":%d,\"rp\":%d,\"c\":[%d,%d,%d,%d,%d,%d],"
+           "\"pf\":%d,\"fo\":%d,\"rt\":%d,\"rv\":%u,\"tg\":%d,\"mp\":%d,\"ac\":%d,\"lt\":%d,"
+           "\"dz\":%d,\"rd\":%d,\"rm\":%d,"
            "\"bootMode\":%d,\"pending\":%d,\"lightOk\":%d,\"rcOk\":%d,\"serialOff\":%d}",
            h.mode, h.motors, h.pin[0], h.pin[1], h.pin[2], h.pin[3], h.pin[4], h.pin[5], h.pin[6], h.pin[7],
            h.inv[0], h.inv[1], h.inv[2], h.inv[3], h.minDuty, h.lightPin, h.rcPin,
            h.ch[0], h.ch[1], h.ch[2], h.ch[3], h.ch[4], h.ch[5],
+           h.pwmFreq, h.failsafeMs, h.rcTimeout, (unsigned)h.rcRev, h.turnGain, h.maxPower, h.accel, h.lightPct,
+           h.stickDz, h.rcDz, h.rcMinSpeed,
            hwBoot.mode, hwPending() ? 1 : 0, lightActive ? 1 : 0, rcActive ? 1 : 0, hwUsesUart0() ? 1 : 0);
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -743,6 +844,8 @@ static void startServers() {
   config.server_port = 80;
   config.ctrl_port = 32768;
   config.lru_purge_enable = true;
+  config.max_uri_handlers = 16;        // domyślnie 8 – za mało dla wszystkich adresów strony
+  config.recv_wait_timeout = 10;       // s – przy wgrywaniu aktualizacji
 
   httpd_uri_t indexUri;
   memset(&indexUri, 0, sizeof(indexUri));
@@ -777,6 +880,10 @@ static void startServers() {
     httpd_uri_t scanUri = { "/scan", HTTP_GET, scanHandler, NULL };
     httpd_register_uri_handler(webHttpd, &wifiUri);
     httpd_register_uri_handler(webHttpd, &scanUri);
+    httpd_uri_t sysUri = { "/sys", HTTP_GET, sysHandler, NULL };
+    httpd_uri_t updateUri = { "/update", HTTP_POST, updateHandler, NULL };
+    httpd_register_uri_handler(webHttpd, &sysUri);
+    httpd_register_uri_handler(webHttpd, &updateUri);
     httpd_register_uri_handler(webHttpd, &wsUri);
   }
 
@@ -817,7 +924,8 @@ static bool cameraStart() {
   c.pin_sccb_scl = SIOC_GPIO_NUM;
   c.pin_pwdn = PWDN_GPIO_NUM;
   c.pin_reset = RESET_GPIO_NUM;
-  c.xclk_freq_hz = 20000000;
+  c.xclk_freq_hz = cam.xclk * 1000000;
+  camInitXclk = cam.xclk;
   c.pixel_format = PIXFORMAT_JPEG;
   c.grab_mode = CAMERA_GRAB_LATEST;   // zawsze najświeższa klatka = mniejsze opóźnienie
 
@@ -1018,6 +1126,83 @@ static esp_err_t scanHandler(httpd_req_t *req) {
   return httpd_resp_send(req, j.c_str(), j.length());
 }
 
+// ---------- System: stan i aktualizacja przez Wi-Fi ----------
+
+static const char *resetReasonText() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "wlaczenie zasilania";
+    case ESP_RST_SW:       return "restart z programu";
+    case ESP_RST_PANIC:    return "blad programu";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return "watchdog (zawieszenie)";
+    case ESP_RST_BROWNOUT: return "spadek napiecia";
+    case ESP_RST_EXT:      return "przycisk RST";
+    case ESP_RST_DEEPSLEEP: return "wybudzenie";
+    default:               return "inna";
+  }
+}
+
+// Stan systemu: wersja, czas pracy, pamięć, miejsce na aktualizację
+static esp_err_t sysHandler(httpd_req_t *req) {
+  const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+  char json[400];
+  snprintf(json, sizeof(json),
+           "{\"ver\":\"%s\",\"up\":%lu,\"reset\":\"%s\",\"heap\":%u,\"heapMin\":%u,\"heapSize\":%u,"
+           "\"psram\":%u,\"psramSize\":%u,\"sketch\":%u,\"otaSize\":%u,\"ota\":%d,\"cpu\":%u}",
+           FW_VERSION, (unsigned long)(millis() / 1000), resetReasonText(),
+           (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), (unsigned)ESP.getHeapSize(),
+           (unsigned)ESP.getFreePsram(), (unsigned)ESP.getPsramSize(),
+           (unsigned)ESP.getSketchSize(), next ? (unsigned)next->size : 0, next ? 1 : 0,
+           (unsigned)ESP.getCpuFreqMHz());
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+}
+
+static volatile bool otaActive = false;
+
+static esp_err_t otaFail(httpd_req_t *req, const char *msg) {
+  Update.abort();
+  otaActive = false;
+  camPause = false;
+  Serial.printf("Aktualizacja nieudana: %s\n", msg);
+  httpd_resp_set_status(req, "500 Internal Server Error");
+  httpd_resp_set_type(req, "text/plain; charset=utf-8");
+  return httpd_resp_send(req, msg, HTTPD_RESP_USE_STRLEN);
+}
+
+// Aktualizacja przez Wi-Fi: POST /update, treść = plik *-app.bin z wydania
+static esp_err_t updateHandler(httpd_req_t *req) {
+  size_t remaining = req->content_len;
+  if (!esp_ota_get_next_update_partition(NULL))
+    return otaFail(req, "Ten uklad pamieci nie obsluguje aktualizacji przez Wi-Fi. Wgraj raz kablem plik full.bin z wersji 1.3.0 lub nowszej.");
+  if (remaining == 0) return otaFail(req, "Pusty plik.");
+  otaActive = true;                    // loop() zatrzymuje silniki
+  camPause = true;                     // strumień obrazu czeka – cała przepustowość dla pliku
+  if (!Update.begin(remaining)) return otaFail(req, "Plik jest za duzy na miejsce na aktualizacje.");
+
+  static uint8_t buf[2048];            // static – stos zadania serwera jest mały
+  bool first = true;
+  while (remaining > 0) {
+    int r = httpd_req_recv(req, (char *)buf, min(remaining, sizeof(buf)));
+    if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+    if (r <= 0) return otaFail(req, "Przerwane polaczenie.");
+    if (first && buf[0] != 0xE9)
+      return otaFail(req, "To nie jest plik programu. Uzyj pliku *-app.bin (nie full.bin).");
+    first = false;
+    if (Update.write(buf, r) != (size_t)r) return otaFail(req, Update.errorString());
+    remaining -= r;
+  }
+  if (!Update.end(true)) return otaFail(req, Update.errorString());
+
+  Serial.println("Aktualizacja wgrana - restart");
+  httpd_resp_set_type(req, "text/plain; charset=utf-8");
+  httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+  rebootRequested = true;              // restart w loop() po wysłaniu odpowiedzi
+  return ESP_OK;
+}
+
 // ============================================================
 
 void setup() {
@@ -1059,23 +1244,30 @@ void loop() {
   rcUpdate();
 
   int x = 0, y = 0, sd = 0;
-  if (rcState == 2) {
+  bool stopNow = false;
+  if (otaActive) {
+    stopNow = true;                   // wgrywanie aktualizacji – robot stoi
+  } else if (rcState == 2) {
     // aparatura połączona i uzbrojona – ma pierwszeństwo
     x = rcX;
     y = rcY;
     sd = rcS;
-  } else if (millis() - lastCmdMs <= FAILSAFE_MS) {
+  } else if (millis() - lastCmdMs <= (unsigned long)hw.failsafeMs) {
     // telefon; bez świeżych komend (failsafe) robot stoi
     x = targetX;
     y = targetY;
     sd = targetS;
+  } else {
+    stopNow = true;                   // failsafe: stop od razu, bez płynnego hamowania
   }
-  drive(x, y, sd);
+  drive(x, y, sd, stopNow);
 
-  bool l = lightOn;
-  if (l != lightApplied) {
-    if (lightActive) pwmWrite(hwBoot.lightPin, CH_LIGHT, l ? LIGHT_DUTY : 0);
-    lightApplied = l;
+  // światło (jasność z menu można zmieniać przy włączonej diodzie)
+  static int lightDutyApplied = -1;
+  int ld = lightOn ? hw.lightPct * 255 / 100 : 0;
+  if (ld != lightDutyApplied) {
+    if (lightActive) pwmWrite(hwBoot.lightPin, CH_LIGHT, ld);
+    lightDutyApplied = ld;
   }
 
   // Konfiguracja napędu: zapis 1 s po ostatniej zmianie; restart na żądanie z menu
@@ -1101,7 +1293,7 @@ void loop() {
   }
 
   if (rebootRequested) {
-    drive(0, 0);
+    drive(0, 0, 0, true);
     if (hwDirty) hwSave();            // nie zgub niezapisanych zmian
     if (camDirty) camSave();
     delay(300);                       // czas na wysłanie odpowiedzi do przeglądarki
@@ -1111,7 +1303,7 @@ void loop() {
   // Restart kamery z innym buforem (zmiana na / z 1024x768 lub HD)
   // loop() nigdy nie czeka dłużej niż 1 s – tu działają też silniki, światło i failsafe
   if (camNeedReinit) {
-    drive(0, 0);                      // na czas restartu kamery robot stoi
+    drive(0, 0, 0, true);             // na czas restartu kamery robot stoi
     camPause = true;
     if (xSemaphoreTake(camMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
       camNeedReinit = false;
