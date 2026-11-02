@@ -1,5 +1,10 @@
 Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu (dwie gałki na ekranie + podgląd z kamery) oraz opcjonalnie z aparatury ExpressLRS.
 
+## Co nowego w v1.3.2
+
+- schemat połączeń: **rysunki modułów L298N i TB6612FNG** z opisem każdego pinu i zacisku (w kolorach zgodnych z rysunkiem ESP32-CAM)
+- nazwy pinów jak na nadruku płytki: IO14, U0T (IO1), U0R (IO3) zamiast „GPIO 14”
+
 ## Co nowego w v1.3.1
 
 - **schemat połączeń** w menu Napęd i ELRS: rysunek płytki ESP32-CAM z opisem każdego pinu i karty modułów (sterownik, przetwornica, odbiornik), liczone na żywo z ustawień

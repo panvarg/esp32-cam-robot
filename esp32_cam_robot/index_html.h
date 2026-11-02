@@ -111,6 +111,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   .wrow{display:flex;gap:8px;font-size:12px;line-height:1.7;color:#cfd6dc}
   .wrow b{min-width:92px;font-weight:600}
   .wrow .dot{width:8px;height:8px;border-radius:50%;margin-top:7px;flex:none}
+  .msvg{width:100%;max-width:320px;height:auto;display:block;margin:0 auto 8px}
   .wnote{font-size:11px;color:#8a949c;margin:6px 0 0}
   .wbtn{height:38px;border-radius:8px;border:1px solid #5aa8f0;background:rgba(59,143,224,.15);color:#cfe6ff;font-size:14px}
   .base.r{width:calc(2 * var(--R) + var(--K) + 14px);height:calc(2 * var(--R) + var(--K) + 14px)}
@@ -242,7 +243,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       <div class="seg" data-h="mot"><button data-v="2">2</button><button data-v="4">4</button></div>
       <p class="note" id="mot-note"></p>
     </div>
-    <div class="grp"><label>Piny L298N</label><div class="grp" id="pins"></div></div>
+    <div class="grp"><label>Piny sterownika silników</label>
+      <p class="note">Nazwy jak na płytce ESP32-CAM: IO14 = GPIO 14, U0T = IO1, U0R = IO3.</p>
+      <div class="grp" id="pins"></div></div>
     <div class="grp"><label>Odwróć kierunek</label><div class="grp" id="invs"></div></div>
     <div class="grp"><label for="md">Minimalna moc startowa <span class="val" id="mdv"></span></label>
       <input type="range" id="md" min="0" max="200" step="5">
@@ -632,11 +635,12 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   // ---------- napęd i ELRS (menu) ----------
   var mecanum = false, hwS = null;
   var FREE_PINS = [1, 2, 3, 4, 12, 13, 14, 15];
-  var PIN_LABELS = {
-    tank: ['Lewa strona – IN1', 'Lewa strona – IN2', 'Prawa strona – IN3', 'Prawa strona – IN4'],
-    mec: ['Lewe przednie – A', 'Lewe przednie – B', 'Prawe przednie – A', 'Prawe przednie – B',
-          'Lewe tylne – A', 'Lewe tylne – B', 'Prawe tylne – A', 'Prawe tylne – B']
-  };
+  function pinLabels(mec, tb){
+    var IN = tb ? ['AIN1', 'AIN2', 'BIN1', 'BIN2'] : ['IN1', 'IN2', 'IN3', 'IN4'];
+    if (!mec) return ['Lewa – ' + IN[0], 'Lewa – ' + IN[1], 'Prawa – ' + IN[2], 'Prawa – ' + IN[3]];
+    var W = ['LP', 'LP', 'PP', 'PP', 'LT', 'LT', 'PT', 'PT'];
+    return W.map(function(w, i){ return w + ' – ' + (i < 4 ? '#1 ' : '#2 ') + IN[i % 4]; });
+  }
   var INV_LABELS = { tank: ['Lewa strona', 'Prawa strona'], mec: ['Lewe przednie', 'Prawe przednie', 'Lewe tylne', 'Prawe tylne'] };
   var CH_FUNCS = ['Skręt / obrót', 'Jazda przód/tył', 'Jazda bokiem (Mecanum)', 'Moc (gaz)', 'Przejęcie sterowania (uzbrojenie)', 'Światło'];
 
@@ -659,24 +663,24 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   }
   function pinOptions(sel, val, allowNone){
     var h = allowNone ? '<option value="-1">brak</option>' : '';
-    FREE_PINS.forEach(function(p){ h += '<option value="' + p + '">GPIO ' + p + '</option>'; });
+    FREE_PINS.forEach(function(p){ h += '<option value="' + p + '">' + gp(p) + (p === 4 ? ' – dioda' : '') + '</option>'; });
     sel.innerHTML = h;
     sel.value = String(val);
   }
   function hwMessages(){
     var err = [], warn = [], n = hwS.mode === 1 ? 8 : 4, mp = hwS.p.slice(0, n);
-    mp.forEach(function(p, i){ if (mp.indexOf(p) !== i) err.push('Pin GPIO ' + p + ' jest użyty dla dwóch wejść.'); });
+    mp.forEach(function(p, i){ if (mp.indexOf(p) !== i) err.push('Pin ' + gp(p) + ' jest użyty dla dwóch wejść.'); });
     if (mp.indexOf(-1) >= 0) err.push('Każde wejście L298N musi mieć wybrany pin.');
-    if (hwS.lp >= 0 && mp.indexOf(hwS.lp) >= 0) warn.push('Dioda będzie wyłączona: pin GPIO ' + hwS.lp + ' zajmują silniki.');
-    if (hwS.rp >= 0 && mp.indexOf(hwS.rp) >= 0) warn.push('Odbiornik ELRS będzie wyłączony: pin GPIO ' + hwS.rp + ' zajmują silniki.');
+    if (hwS.lp >= 0 && mp.indexOf(hwS.lp) >= 0) warn.push('Dioda będzie wyłączona: pin ' + gp(hwS.lp) + ' zajmują silniki.');
+    if (hwS.rp >= 0 && mp.indexOf(hwS.rp) >= 0) warn.push('Odbiornik ELRS będzie wyłączony: pin ' + gp(hwS.rp) + ' zajmują silniki.');
     if (hwS.rp >= 0 && hwS.rp === hwS.lp) warn.push('Dioda i odbiornik mają ten sam pin – odbiornik będzie wyłączony.');
     var all = mp.concat([hwS.lp, hwS.rp]);
     if (all.indexOf(1) >= 0 || all.indexOf(3) >= 0)
-      warn.push('Piny 1 i 3 to port programatora: Serial Monitor zostanie wyłączony, a przy wgrywaniu programu odłącz przewody z tych pinów.');
-    if (mp.indexOf(1) >= 0) warn.push('GPIO 1 przy starcie wysyła dane – podłączony silnik może na chwilę drgnąć.');
-    if (mp.indexOf(4) >= 0) warn.push('GPIO 4 steruje też diodą flash – będzie świecić podczas jazdy.');
-    if (all.indexOf(2) >= 0) warn.push('GPIO 2: przy wgrywaniu programu odłącz od niego przewód.');
-    if (all.indexOf(12) >= 0) warn.push('GPIO 12 musi mieć stan niski przy starcie – jeśli robot nie startuje, dodaj rezystor 10 kΩ do GND.');
+      warn.push('U0T (IO1) i U0R (IO3) to piny programatora: Serial Monitor zostanie wyłączony, a przy wgrywaniu programu odłącz przewody z tych pinów.');
+    if (mp.indexOf(1) >= 0) warn.push('U0T (IO1) przy starcie wysyła dane – podłączony silnik może na chwilę drgnąć.');
+    if (mp.indexOf(4) >= 0) warn.push('IO4 steruje też diodą flash – będzie świecić podczas jazdy.');
+    if (all.indexOf(2) >= 0) warn.push('IO2: przy wgrywaniu programu odłącz od niego przewód.');
+    if (all.indexOf(12) >= 0) warn.push('IO12 musi mieć stan niski przy starcie – jeśli robot nie startuje, dodaj rezystor 10 kΩ do GND.');
     if (hwS.drv === 1 && hwS.md > 70) warn.push('TB6612 nie traci napięcia jak L298N – zmniejsz minimalną moc startową do ok. 40–60.');
     if (hwS.mode === 1) warn.push('Mecanum potrzebuje 8 pinów, czyli wszystkich wolnych – nie zostaje pin dla odbiornika ELRS.');
     return { err: err, warn: warn };
@@ -709,9 +713,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       : hwS.mot === 4 ? '4 silniki: dwa L298N, wejścia IN obu modułów połączone równolegle (te same 4 piny).'
       : '2 silniki: jeden L298N.';
     var ph = '';
-    PIN_LABELS[key].forEach(function(l, i){ ph += '<div class="pinrow"><span>' + l + '</span><select data-pin="p' + i + '"></select></div>'; });
-    var pins = document.getElementById('pins');
-    if (pins.dataset.key !== key){ pins.innerHTML = ph; pins.dataset.key = key; }
+    pinLabels(mec, hwS.drv === 1).forEach(function(l, i){ ph += '<div class="pinrow"><span>' + l + '</span><select data-pin="p' + i + '"></select></div>'; });
+    var pins = document.getElementById('pins'), pkey = key + hwS.drv;
+    if (pins.dataset.key !== pkey){ pins.innerHTML = ph; pins.dataset.key = pkey; }
     var sels = pins.querySelectorAll('select');
     for (var k = 0; k < sels.length; k++) pinOptions(sels[k], hwS.p[k], false);
     pinOptions(document.getElementById('lp'), hwS.lp, true);
@@ -889,7 +893,59 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   function wrow(color, a, b){ return '<div class="wrow"><span class="dot" style="background:' + color + '"></span><b>' + a + '</b><span>' + b + '</span></div>'; }
   function gp(p){ return p >= 0 ? (p === 1 ? 'U0T (IO1)' : p === 3 ? 'U0R (IO3)' : 'IO' + p) : '–'; }
 
+  // Rysunek modułu sterownika z opisem każdego pinu. pins: [x, y, strona l/r/b, nazwa, podłączenie, kolor]
+  function moduleSvg(w, h, body, pins){
+    var o = '<svg viewBox="0 0 ' + w + ' ' + h + '" class="msvg" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">' + body;
+    pins.forEach(function(p){
+      var x = p[0], y = p[1], sd = p[2];
+      o += '<circle cx="' + x + '" cy="' + y + '" r="5" fill="' + p[5] + '" stroke="#0e1215" stroke-width="2"/>';
+      if (sd === 'b'){
+        o += '<text transform="translate(' + (x + 4) + ',' + (y - 9) + ') rotate(-90)" fill="#e6ebef" font-size="10" font-weight="600">' + p[3] + '</text>';
+        o += '<text transform="translate(' + (x + 4) + ',' + (y + 9) + ') rotate(-90)" fill="' + p[5] + '" font-size="10" text-anchor="end">' + esc(p[4]) + '</text>';
+      } else {
+        var l = sd === 'l';
+        o += '<text x="' + (l ? x + 9 : x - 9) + '" y="' + (y + 3.5) + '" fill="#e6ebef" font-size="10" font-weight="600" text-anchor="' + (l ? 'start' : 'end') + '">' + p[3] + '</text>';
+        o += '<text x="' + (l ? x - 9 : x + 9) + '" y="' + (y + 3.5) + '" fill="' + p[5] + '" font-size="10" text-anchor="' + (l ? 'end' : 'start') + '">' + esc(p[4]) + '</text>';
+      }
+    });
+    return o + '</svg>';
+  }
+
+  // L298N widziany z góry: radiator u góry, zaciski silników po bokach, zasilanie i piny IN na dole
+  function l298nSvg(ins, cols, motors, first){
+    var body = '<rect x="80" y="10" width="160" height="150" rx="6" fill="#3a1d20" stroke="#a8454a"/>' +
+      '<rect x="125" y="16" width="70" height="44" rx="3" fill="#2a2f34" stroke="#55606a"/>' +
+      '<text x="160" y="42" fill="#8a949c" font-size="9" text-anchor="middle">radiator</text>' +
+      '<text x="160" y="84" fill="#c9a0a3" font-size="11" font-weight="600" text-anchor="middle">L298N</text>' +
+      '<rect x="82" y="38" width="14" height="44" rx="2" fill="#2b5fa8"/><rect x="224" y="38" width="14" height="44" rx="2" fill="#2b5fa8"/>' +
+      '<rect x="88" y="130" width="62" height="16" rx="2" fill="#2b5fa8"/>';
+    var pins = [
+      [89, 50, 'l', 'OUT1', motors[0], cols[0]], [89, 70, 'l', 'OUT2', motors[0], cols[0]],
+      [231, 50, 'r', 'OUT3', motors[1], cols[1]], [231, 70, 'r', 'OUT4', motors[1], cols[1]],
+      [96, 138, 'b', '+12V', 'aku +', C_PWR], [119, 138, 'b', 'GND', 'masa', C_GND],
+      [142, 138, 'b', '+5V', first ? '→ 5V ESP' : 'wolny', first ? C_PWR : C_OFF],
+      [166, 150, 'b', 'ENA', 'zworka', C_OFF], [180, 150, 'b', 'IN1', ins[0], cols[0]], [194, 150, 'b', 'IN2', ins[1], cols[0]],
+      [208, 150, 'b', 'IN3', ins[2], cols[1]], [222, 150, 'b', 'IN4', ins[3], cols[1]], [236, 150, 'b', 'ENB', 'zworka', C_OFF]
+    ];
+    return moduleSvg(320, 210, body, pins);
+  }
+
+  // TB6612FNG (moduł 16 pinów jak SparkFun): lewa i prawa listwa
+  function tb6612Svg(ins, cols, motors){
+    var body = '<rect x="110" y="6" width="100" height="204" rx="6" fill="#2a1f3a" stroke="#7a5fb0"/>' +
+      '<text x="160" y="22" fill="#b7a6d8" font-size="10" font-weight="600" text-anchor="middle">TB6612FNG</text>';
+    var L = [['PWMA', '3V3', C_PWR], ['AIN2', ins[1], cols[0]], ['AIN1', ins[0], cols[0]], ['STBY', '3V3', C_PWR],
+             ['BIN1', ins[2], cols[1]], ['BIN2', ins[3], cols[1]], ['PWMB', '3V3', C_PWR], ['GND', 'masa', C_GND]];
+    var R = [['VM', 'aku +', C_PWR], ['VCC', '3V3', C_PWR], ['GND', 'masa', C_GND], ['AO1', motors[0], cols[0]],
+             ['AO2', motors[0], cols[0]], ['BO2', motors[1], cols[1]], ['BO1', motors[1], cols[1]], ['GND', 'masa', C_GND]];
+    var pins = [];
+    L.forEach(function(p, i){ pins.push([116, 40 + i * 22, 'l', p[0], p[1], p[2]]); });
+    R.forEach(function(p, i){ pins.push([204, 40 + i * 22, 'r', p[0], p[1], p[2]]); });
+    return moduleSvg(320, 216, body, pins);
+  }
+
   function wiringCards(m){
+    var mods4 = hwS.mode !== 1 && hwS.mot === 4;
     var mec = hwS.mode === 1, tb = hwS.drv === 1, name = tb ? 'TB6612FNG' : 'L298N';
     var IN = tb ? ['AIN1', 'AIN2', 'BIN1', 'BIN2'] : ['IN1', 'IN2', 'IN3', 'IN4'];
     var OUT = tb ? ['AO1/AO2', 'BO1/BO2'] : ['OUT1/OUT2', 'OUT3/OUT4'];
@@ -898,7 +954,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       var base = mec ? k * 4 : 0, title = name + (mods > 1 ? (k ? ' #2 (tył)' : ' #1 (przód)') : '');
       var wheels = mec ? ['koło ' + (k ? 'lewe tylne (LT)' : 'lewe przednie (LP)'), 'koło ' + (k ? 'prawe tylne (PT)' : 'prawe przednie (PP)')]
         : (mods > 1 ? [k ? 'silnik lewy tylny' : 'silnik lewy przedni', k ? 'silnik prawy tylny' : 'silnik prawy przedni'] : ['silnik lewy', 'silnik prawy']);
-      h += '<div class="wcard"><h4>' + title + '</h4>';
+      var ins = [0, 1, 2, 3].map(function(i){ return gp(hwS.p[base + i]); });
+      var cols = mec ? [WCOL[base >> 1], WCOL[(base >> 1) + 1]] : [WCOL[0], WCOL[1]];
+      var short = mods > 1 ? (k ? ['silnik LT', 'silnik PT'] : ['silnik LP', 'silnik PP']) : ['silnik L', 'silnik P'];
+      h += '<div class="wcard"><h4>' + title + '</h4>' + (tb ? tb6612Svg(ins, cols, short) : l298nSvg(ins, cols, short, k === 0));
       for (var i = 0; i < 4; i++){
         var gi = base + i, col = WCOL[mec ? (base + i) >> 1 : i >> 1];
         h += wrow(col, IN[i] + ' ←', gp(hwS.p[gi]) + (!mec && k ? ' (razem z #1)' : ''));
@@ -929,7 +988,8 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     for (var key in m) if (m[key].bad) { notes.push('Na schemacie jest konflikt pinów – popraw go w zakładce Napęd.'); break; }
     if (hwS.lp >= 0 && mp.indexOf(hwS.lp) >= 0) notes.push('Dioda jest wyłączona – jej pin ' + gp(hwS.lp) + ' steruje silnikiem' + (hwS.lp === 4 ? ', więc dioda na płytce będzie świecić podczas jazdy.' : '.'));
     if (mp.indexOf(1) >= 0 || mp.indexOf(3) >= 0) notes.push('U0T/U0R (IO1/IO3) to piny programatora: przy wgrywaniu kablem odłącz od nich przewody.');
-    if (mec) notes.push('Skróty: LP – lewe przednie, PP – prawe przednie, LT – lewe tylne, PT – prawe tylne.');
+    if (tb) notes.push('Rysunek TB6612 pokazuje najczęstszy układ pinów (jak w module SparkFun). Na niektórych modułach kolejność jest inna – sprawdź napisy na płytce.');
+    if (mec || mods4) notes.push('Skróty: LP – lewe przednie, PP – prawe przednie, LT – lewe tylne, PT – prawe tylne.');
     if (!mec && hwS.mot === 4) notes.push('4 silniki: wejścia obu modułów łączysz równolegle z tymi samymi pinami ESP32.');
     notes.push('Jeśli koło kręci się w złą stronę, zamień jego dwa przewody albo użyj „Odwróć kierunek”.');
     h += '<div class="wcard"><h4>Uwagi</h4>' + notes.map(function(t){ return '<p class="wnote">' + t + '</p>'; }).join('') + '</div>';
