@@ -20,7 +20,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   :root{--R:85px;--K:76px}   /* zakres ruchu i rozmiar gałki – JS dopasowuje je do ekranu */
   [hidden]{display:none!important}
   /* zapasowy obrót do poziomu, gdy telefon nie pozwala zablokować orientacji (iPhone, ramka) */
-  body.rot #app{position:fixed;top:0;transform-origin:0 0;transform:rotate(90deg);overflow:hidden}
+  body.rot #app{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) rotate(90deg);overflow:hidden}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
   html{color-scheme:dark}
   html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#fff;
@@ -505,7 +505,9 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   function fsSave(p){ try { localStorage.setItem(FS_KEY, JSON.stringify(p)); } catch (e) {} }
   function fsActive(){ return !!(document.fullscreenElement || document.webkitFullscreenElement); }
   function fsSupported(){ var d = document.documentElement; return !!(d.requestFullscreen || d.webkitRequestFullscreen); }
-  var standalone = (window.matchMedia && (matchMedia('(display-mode: fullscreen)').matches || matchMedia('(display-mode: standalone)').matches)) || navigator.standalone;
+  // aplikacja z ekranu początkowego (nie w ramce); zawsze true/false – navigator.standalone bywa undefined
+  var standalone = window.top === window && !!((window.matchMedia && (matchMedia('(display-mode: fullscreen)').matches ||
+    matchMedia('(display-mode: standalone)').matches)) || navigator.standalone);
   function enterFs(){
     var d = document.documentElement, p = fsPrefs(), r;
     try { r = d.requestFullscreen ? d.requestFullscreen({ navigationUI: 'hide' }) : d.webkitRequestFullscreen(); } catch (e) { r = Promise.reject(e); }
@@ -518,16 +520,27 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   // Zapasowy obrót: cały interfejs obrócony o 90°, gdy telefon jest pionowo, a blokada orientacji nie zadziałała
   var rotFallback = false;
   function updRot(){
-    var on = !!fsPrefs().land && window.innerHeight > window.innerWidth &&
-             ((fsActive() && rotFallback) || standalone);
+    var on = !!(fsPrefs().land && window.innerHeight > window.innerWidth &&
+               ((fsActive() && rotFallback) || standalone));
     var a = document.getElementById('app');
+    // obrót wokół środka ekranu – przy chwilowo złych wymiarach obraz i tak zostaje na ekranie
     a.style.width = on ? window.innerHeight + 'px' : '';
     a.style.height = on ? window.innerWidth + 'px' : '';
-    a.style.left = on ? window.innerWidth + 'px' : '';
     if (on !== rotated){
       rotated = on;
       document.body.classList.toggle('rot', on);
       window.dispatchEvent(new Event('resize'));   // układ, kamera i gałki przeliczają się na nowe wymiary
+      if (on) [150, 600, 1500].forEach(function(t){ setTimeout(rotCheck, t); });
+    }
+  }
+  // po wejściu w pełny ekran wymiary okna ustalają się z opóźnieniem; gdyby obraz wypadł poza ekran – bez obrotu
+  function rotCheck(){
+    if (!rotated) return;
+    updRot();
+    var r = document.getElementById('app').getBoundingClientRect();
+    if (r.right < 40 || r.left > window.innerWidth - 40 || r.bottom < 40 || r.top > window.innerHeight - 40){
+      rotFallback = false;
+      updRot();
     }
   }
   window.addEventListener('resize', updRot);
