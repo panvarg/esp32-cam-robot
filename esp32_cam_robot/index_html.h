@@ -148,14 +148,29 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   body.editing .li.sel{outline:2px solid #5aa8f0;background:rgba(40,80,140,.4)}
   body.editing .li *{pointer-events:none}
   body.editing #top,body.editing #readout,body.editing #hint,body.editing #rc{display:none}
-  #etb{position:fixed;top:6px;left:50%;transform:translateX(-50%);z-index:15;display:flex;flex-wrap:wrap;gap:6px;
-    justify-content:center;align-items:center;width:max-content;max-width:96vw;background:rgba(16,19,23,.94);padding:6px;border-radius:12px;font-size:12px}
-  #etb button{height:32px;padding:0 9px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;font-size:13px}
+  /* edytor: % zamiast vw/vh – przy obróconym interfejsie liczą się wymiary obróconego ekranu */
+  #etb{position:fixed;top:6px;left:50%;transform:translateX(-50%);z-index:15;display:flex;flex-wrap:nowrap;gap:5px;
+    align-items:center;max-width:96%;overflow-x:auto;background:rgba(16,19,23,.94);padding:5px;border-radius:12px;font-size:12px;white-space:nowrap}
+  #etb button{flex:none;height:30px;padding:0 9px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;font-size:12px}
+  #etb button.on{background:rgba(80,170,255,.35);border-color:#5aa8f0}
   #etb .done{background:#3b8fe0;border-color:#5aa8f0;font-weight:600}
-  #etb input{width:80px;accent-color:#3b8fe0}
-  #epanel{position:fixed;left:50%;bottom:6px;transform:translateX(-50%);width:min(380px,96vw);max-height:52vh;overflow:auto;z-index:15;
-    background:rgba(16,19,23,.96);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:10px 12px;
-    display:flex;flex-direction:column;gap:10px;touch-action:pan-y;color:#fff}
+  #etb label{display:flex;align-items:center;gap:4px;color:#cfd6dc}
+  #etb input{width:64px;accent-color:#3b8fe0}
+  #eadd{position:fixed;top:46px;left:50%;transform:translateX(-50%);z-index:16;display:flex;flex-wrap:wrap;gap:5px;justify-content:center;
+    max-width:96%;background:rgba(16,19,23,.96);padding:6px;border-radius:12px;border:1px solid rgba(255,255,255,.15)}
+  #eadd button{height:34px;padding:0 10px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;font-size:13px}
+  #ehint{position:fixed;left:50%;bottom:8px;transform:translateX(-50%);z-index:14;max-width:92%;font-size:12px;color:#cfd6dc;
+    background:rgba(16,19,23,.9);padding:6px 10px;border-radius:10px;pointer-events:none;transition:opacity .4s}
+  /* panel elementu: boczny pasek po przeciwnej stronie niż zaznaczony element (w pionie – dół albo góra) */
+  #epanel{position:fixed;top:46px;bottom:6px;right:6px;width:min(300px,46%);overflow:auto;z-index:15;
+    background:rgba(16,19,23,.95);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:8px 10px;
+    display:flex;flex-direction:column;gap:8px;touch-action:pan-y;color:#fff}
+  #epanel.left{right:auto;left:6px}
+  body.aport #epanel{top:auto;bottom:6px;left:6px;right:6px;width:auto;max-height:44%}
+  body.aport #epanel.up{bottom:auto;top:46px}
+  #epanel .phead{display:flex;align-items:center;gap:6px}
+  #epanel .phead b{flex:1}
+  body.dragging #etb,body.dragging #epanel,body.dragging #eadd,body.dragging #ehint{opacity:.12;pointer-events:none}
   #hint{position:fixed;bottom:10px;right:10px;font-size:11px;color:#bbb}
   @media (pointer:coarse){#hint{display:none}}
   @media (orientation:portrait){
@@ -181,11 +196,15 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 </div>
 
 <div id="etb" hidden>
-  <button data-add="stick">+ Gałka</button><button data-add="btn">+ Przycisk</button><button data-add="pad">+ Kamera</button>
-  <button data-add="light">+ Światło</button><button data-add="speed">+ Moc</button>
+  <button id="eaddb">+ Dodaj</button>
   <label>Krycie <input type="range" id="eop" min="20" max="100" step="5"></label>
   <button id="edef">Domyślny</button><button class="done" id="edone">Gotowe</button>
 </div>
+<div id="eadd" hidden>
+  <button data-add="stick">Gałka</button><button data-add="btn">Przycisk</button><button data-add="pad">Pole kamery</button>
+  <button data-add="light">Światło</button><button data-add="speed">Moc</button>
+</div>
+<div id="ehint" hidden></div>
 <div id="epanel" hidden></div>
 
 <div id="menu" hidden>
@@ -872,11 +891,14 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     document.getElementById('eop').value = layout.op;
     renderLayout();
     renderPanel();
+    showHint('Przeciągnij element, żeby go przesunąć. Dotknij – rozmiar i funkcja (rozmiar też dwoma palcami). Układ ' +
+      (portrait() ? 'pionowy' : 'poziomy') + ' – obróć telefon, żeby ustawić drugi.', 6000);
   }
   function closeEditor(){
     editing = false; selIdx = null;
     document.body.classList.remove('editing');
-    etb.hidden = true; epanel.hidden = true;
+    etb.hidden = true; epanel.hidden = true; eadd.hidden = true; ehint.hidden = true;
+    document.body.classList.remove('dragging');
     saveLayout();
     renderLayout();
   }
@@ -887,9 +909,21 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     selIdx = null; renderLayout(); renderPanel();
   });
   document.getElementById('eop').addEventListener('input', function(){ layout.op = +this.value; });
-  etb.addEventListener('click', function(e){
+  var eadd = document.getElementById('eadd'), ehint = document.getElementById('ehint'), hintTimer = null;
+  document.getElementById('eaddb').addEventListener('click', function(){
+    eadd.hidden = !eadd.hidden;
+    this.classList.toggle('on', !eadd.hidden);
+  });
+  function showHint(t, ms){
+    ehint.textContent = t; ehint.hidden = false; ehint.style.opacity = 1;
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(function(){ ehint.style.opacity = 0; setTimeout(function(){ ehint.hidden = true; }, 400); }, ms || 4500);
+  }
+  eadd.addEventListener('click', function(e){
     var t = e.target.dataset.add;
     if (!t) return;
+    eadd.hidden = true;
+    document.getElementById('eaddb').classList.remove('on');
     var it = { t: t, x: 50, y: 50, s: t === 'stick' ? 40 : t === 'pad' ? 36 : 12 };
     if (t === 'stick'){ it.fx = 'turn'; it.fy = 'gas'; it.fl = 1; it.sp = 1; }
     if (t === 'btn'){
@@ -902,7 +936,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     selIdx = items().length - 1;
     renderLayout(); renderPanel();
   });
-  function alertPanel(t){ epanel.hidden = false; epanel.innerHTML = '<div class="msg warn">' + t + '</div>'; }
+  function alertPanel(t){ showHint(t, 3500); }
 
   // przeciąganie elementów, a dwoma palcami – zmiana rozmiaru zaznaczonego
   var eptr = {}, edrag = null, epinch = null;
@@ -934,7 +968,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
         }
         if (!edrag || e.pointerId !== edrag.id) return;
         var q1 = P(e), dx = q1.x - edrag.sx, dy = q1.y - edrag.sy;
-        if (Math.abs(dx) + Math.abs(dy) > 4) edrag.moved = true;
+        if (Math.abs(dx) + Math.abs(dy) > 4 && !edrag.moved){ edrag.moved = true; document.body.classList.add('dragging'); }
         var it = items()[edrag.idx];
         it.x = Math.round(Math.max(0, Math.min(100, edrag.x + dx / appW() * 100)) * 2) / 2;
         it.y = Math.round(Math.max(0, Math.min(100, edrag.y + dy / appH() * 100)) * 2) / 2;
@@ -944,7 +978,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       function up(e){
         delete eptr[e.pointerId];
         if (Object.keys(eptr).length < 2) epinch = null;
-        if (edrag && e.pointerId === edrag.id) edrag = null;
+        if (edrag && e.pointerId === edrag.id){ edrag = null; document.body.classList.remove('dragging'); renderPanel(); }
       }
       el.addEventListener('pointerup', up);
       el.addEventListener('pointercancel', up);
@@ -964,14 +998,14 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   }
   var TYPE_NAMES = { stick: 'Gałka', btn: 'Przycisk', pad: 'Pole kamery', light: 'Światło', speed: 'Moc' };
   function renderPanel(){
-    if (!editing){ epanel.hidden = true; return; }
+    document.body.classList.toggle('aport', portrait());
+    if (!editing || selIdx === null || !items()[selIdx]){ epanel.hidden = true; return; }
     epanel.hidden = false;
-    if (selIdx === null || !items()[selIdx]){
-      epanel.innerHTML = '<p class="note">Przeciągnij element, żeby go przesunąć. Dotknij go, żeby zmienić rozmiar i funkcję – rozmiar zmienisz też dwoma palcami. ' +
-        'Układ dla telefonu trzymanego ' + (portrait() ? 'pionowo' : 'poziomo') + ' – obróć telefon, żeby ustawić drugi.</p>';
-      return;
-    }
-    var it = items()[selIdx], h = '<div class="pinrow"><b>' + TYPE_NAMES[it.t] + '</b><button class="small" id="edel">Usuń</button></div>';
+    var it = items()[selIdx];
+    // panel po przeciwnej stronie niż element – nie zasłania tego, co ustawiasz
+    epanel.classList.toggle('left', it.x >= 50);
+    epanel.classList.toggle('up', it.y >= 50);
+    var h = '<div class="phead"><b>' + TYPE_NAMES[it.t] + '</b><button class="small" id="edel">Usuń</button><button class="small" id="eclose" aria-label="Zamknij">&#10005;</button></div>';
     h += rng('Rozmiar', 'data-lk', 's', it.s, 6, 80, 1, '%');
     if (it.t === 'stick'){
       h += '<div class="pinrow"><span>Lewo / prawo</span><select data-lk="fx">' + svOpts(FX, it.fx) + '</select></div>';
@@ -1003,6 +1037,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     renderLayout(); renderPanel();
   });
   epanel.addEventListener('click', function(e){
+    if (e.target.id === 'eclose'){ selIdx = null; renderLayout(); renderPanel(); return; }
     if (e.target.id !== 'edel' || selIdx === null) return;
     items().splice(selIdx, 1);
     selIdx = null;
