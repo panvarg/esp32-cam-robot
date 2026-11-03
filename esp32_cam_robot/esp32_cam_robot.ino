@@ -1055,6 +1055,8 @@ static esp_err_t scanHandler(httpd_req_t *req);
 static esp_err_t sysHandler(httpd_req_t *req);
 static esp_err_t ioHandler(httpd_req_t *req);
 static esp_err_t layoutGetHandler(httpd_req_t *req);
+static esp_err_t manifestHandler(httpd_req_t *req);
+static esp_err_t iconHandler(httpd_req_t *req);
 static esp_err_t layoutPostHandler(httpd_req_t *req);
 static esp_err_t updateHandler(httpd_req_t *req);
 
@@ -1291,6 +1293,10 @@ static void startServers() {
     httpd_register_uri_handler(webHttpd, &ioUri);
     httpd_uri_t layGet = { "/layout", HTTP_GET, layoutGetHandler, NULL };
     httpd_uri_t layPost = { "/layout", HTTP_POST, layoutPostHandler, NULL };
+    httpd_uri_t manUri = { "/manifest.json", HTTP_GET, manifestHandler, NULL };
+    httpd_uri_t iconUri = { "/icon.svg", HTTP_GET, iconHandler, NULL };
+    httpd_register_uri_handler(webHttpd, &manUri);
+    httpd_register_uri_handler(webHttpd, &iconUri);
     httpd_register_uri_handler(webHttpd, &layGet);
     httpd_register_uri_handler(webHttpd, &layPost);
     httpd_uri_t updateUri = { "/update", HTTP_POST, updateHandler, NULL };
@@ -1610,6 +1616,29 @@ static esp_err_t layoutPostHandler(httpd_req_t *req) {
   prefs.end();
   free(buf);
   return httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+}
+
+// ---------- Aplikacja na ekranie początkowym: pełny ekran, poziomo ----------
+
+static esp_err_t manifestHandler(httpd_req_t *req) {
+  static const char *M =
+    "{\"name\":\"ESP32 Robot\",\"short_name\":\"Robot\",\"start_url\":\"/\",\"display\":\"fullscreen\","
+    "\"orientation\":\"landscape\",\"background_color\":\"#000000\",\"theme_color\":\"#000000\","
+    "\"icons\":[{\"src\":\"/icon.svg\",\"sizes\":\"any\",\"type\":\"image/svg+xml\"}]}";
+  httpd_resp_set_type(req, "application/manifest+json");
+  return httpd_resp_send(req, M, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t iconHandler(httpd_req_t *req) {
+  static const char *ICON =
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect width='96' height='96' rx='20' fill='#14202b'/>"
+    "<rect x='22' y='30' width='52' height='40' rx='8' fill='#3a4650'/><rect x='14' y='26' width='12' height='18' rx='3' fill='#0a0c0e'/>"
+    "<rect x='70' y='26' width='12' height='18' rx='3' fill='#0a0c0e'/><rect x='14' y='56' width='12' height='18' rx='3' fill='#0a0c0e'/>"
+    "<rect x='70' y='56' width='12' height='18' rx='3' fill='#0a0c0e'/><circle cx='48' cy='44' r='9' fill='#55aaff'/>"
+    "<circle cx='48' cy='44' r='4' fill='#0a0c0e'/></svg>";
+  httpd_resp_set_type(req, "image/svg+xml");
+  httpd_resp_set_hdr(req, "Cache-Control", "max-age=86400");
+  return httpd_resp_send(req, ICON, HTTPD_RESP_USE_STRLEN);
 }
 
 // ---------- System: stan i aktualizacja przez Wi-Fi ----------

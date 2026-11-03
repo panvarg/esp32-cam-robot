@@ -265,7 +265,9 @@ Obraz, napęd, piny i kanały aparatury ustawiasz na stronie, w menu ⚙. W plik
 
 Jeśli robot skręca w lewo, gdy wychylasz gałkę w prawo, zamień miejscami przewody silnika lewego i prawego (OUT1/2 ↔ OUT3/4) albo zamień piny lewej i prawej strony w menu ⚙ → Napęd.
 
-**Wskazówka:** na telefonie dodaj stronę do ekranu głównego („Dodaj do ekranu początkowego”) i trzymaj telefon poziomo. Pasek adresu wtedy znika.
+**Pełny ekran:** przycisk ⛶ obok ⚙ chowa pasek adresu i pasek systemu, a ekran obraca się do poziomu, nawet gdy trzymasz telefon pionowo. Działa w Chrome i Edge na Androidzie oraz na komputerze. W ⚙ → Przyciski możesz włączyć „Włączaj po pierwszym dotknięciu”, bo przeglądarka nie pozwala włączyć pełnego ekranu bez dotknięcia. Opcja „Obracaj ekran do poziomu” decyduje o obrocie. Oba ustawienia zapisują się osobno na każdym telefonie.
+
+**iPhone:** Safari nie pozwala stronom na pełny ekran. Użyj Udostępnij → „Do ekranu początkowego”: strona otworzy się jak aplikacja, bez paska adresu.
 
 ## Nowe wydanie (dla autora)
 

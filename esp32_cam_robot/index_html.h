@@ -11,6 +11,10 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg">
 <title>ESP32 Robot</title>
 <style>
   :root{--R:85px;--K:76px}   /* zakres ruchu i rozmiar gałki – JS dopasowuje je do ekranu */
@@ -169,6 +173,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <div id="lay"></div>
 
 <div id="top">
+  <div class="btn" id="fsb" title="Pełny ekran">&#9974;</div>
   <div class="btn" id="gear" title="Ustawienia">&#9881;</div>
 </div>
 
@@ -345,6 +350,11 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 
   <div class="mbody" id="tab-przyciski" hidden>
     <button class="wbtn eopen">Edytuj układ ekranu</button>
+    <div class="grp"><label>Pełny ekran (ten telefon)</label>
+      <div class="row"><label for="fsauto">Włączaj po pierwszym dotknięciu</label><input type="checkbox" id="fsauto"></div>
+      <div class="row"><label for="fsland">Obracaj ekran do poziomu</label><input type="checkbox" id="fsland"></div>
+      <p class="note" id="fsnote">Przycisk ⛶ obok ⚙ chowa pasek adresu i pasek systemu. Działa w Chrome i Edge na Androidzie oraz na komputerze. Na iPhonie: Udostępnij → „Do ekranu początkowego” – strona otworzy się bez paska adresu.</p>
+    </div>
     <p class="note">Tu ustawiasz, co robi każdy z 8 przycisków. Na ekran dodajesz je w edytorze układu, tam też zmienisz ich położenie i rozmiar. Każdy można też wyzwalać przełącznikiem aparatury.</p>
     <div class="grp" id="acts"></div>
     <div class="grp" id="actmsg"></div>
@@ -472,6 +482,53 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   var camS = {};
   var PRESETS = [ { fs: 0, q: 14 }, { fs: 2, q: 12 }, { fs: 3, q: 10 } ];   // Płynnie / Balans / Jakość
   tap('gear', function(){ menu.hidden = !menu.hidden; });
+
+  // ---------- pełny ekran ----------
+  // Przeglądarka pozwala na pełny ekran i blokadę obrotu tylko po dotknięciu – stąd przycisk ⛶
+  // albo opcja „po pierwszym dotknięciu”. Ustawienia są osobne dla każdego telefonu.
+  var FS_KEY = 'robotFullscreen';
+  function fsPrefs(){
+    try { var p = JSON.parse(localStorage.getItem(FS_KEY)); if (p) return p; } catch (e) {}
+    return { auto: 0, land: 1 };
+  }
+  function fsSave(p){ try { localStorage.setItem(FS_KEY, JSON.stringify(p)); } catch (e) {} }
+  function fsActive(){ return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+  function fsSupported(){ var d = document.documentElement; return !!(d.requestFullscreen || d.webkitRequestFullscreen); }
+  var standalone = (window.matchMedia && (matchMedia('(display-mode: fullscreen)').matches || matchMedia('(display-mode: standalone)').matches)) || navigator.standalone;
+  function enterFs(){
+    var d = document.documentElement, p = fsPrefs(), r;
+    try { r = d.requestFullscreen ? d.requestFullscreen({ navigationUI: 'hide' }) : d.webkitRequestFullscreen(); } catch (e) { r = Promise.reject(e); }
+    Promise.resolve(r).then(function(){
+      if (p.land && screen.orientation && screen.orientation.lock) return screen.orientation.lock('landscape');
+    }).catch(function(){});
+  }
+  function exitFs(){
+    if (screen.orientation && screen.orientation.unlock) try { screen.orientation.unlock(); } catch (e) {}
+    if (document.exitFullscreen) document.exitFullscreen().catch(function(){});
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+  function fsUpdate(){
+    var b = document.getElementById('fsb');
+    b.style.display = standalone || !fsSupported() ? 'none' : '';
+    b.classList.toggle('on', fsActive());
+    b.title = fsActive() ? 'Wyjdź z pełnego ekranu' : 'Pełny ekran';
+  }
+  tap('fsb', function(){ fsActive() ? exitFs() : enterFs(); });
+  document.addEventListener('fullscreenchange', fsUpdate);
+  document.addEventListener('webkitfullscreenchange', fsUpdate);
+  // pierwsze dotknięcie gdziekolwiek (np. gałki) włącza pełny ekran, jeśli tak ustawiono
+  document.addEventListener('pointerdown', function(){
+    if (fsPrefs().auto && !fsActive() && !standalone && fsSupported() && !editing) enterFs();
+  }, true);
+  (function(){
+    var p = fsPrefs(), a = document.getElementById('fsauto'), l = document.getElementById('fsland');
+    a.checked = !!p.auto; l.checked = !!p.land;
+    a.addEventListener('change', function(){ var q = fsPrefs(); q.auto = a.checked ? 1 : 0; fsSave(q); });
+    l.addEventListener('change', function(){ var q = fsPrefs(); q.land = l.checked ? 1 : 0; fsSave(q); });
+    if (standalone) document.getElementById('fsnote').textContent = 'Strona działa jako aplikacja z ekranu początkowego – pasek adresu jest już schowany.';
+    else if (!fsSupported()) document.getElementById('fsnote').textContent = 'Ta przeglądarka nie pozwala stronom na pełny ekran. Na iPhonie: Udostępnij → „Do ekranu początkowego” – strona otworzy się bez paska adresu.';
+    fsUpdate();
+  })();
   var tab = 'obraz';
   var tabBtns = menu.querySelectorAll('.tabs button');
   for (var ti = 0; ti < tabBtns.length; ti++) tabBtns[ti].addEventListener('click', function(){
