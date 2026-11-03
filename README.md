@@ -265,7 +265,7 @@ Obraz, napęd, piny i kanały aparatury ustawiasz na stronie, w menu ⚙. W plik
 
 Jeśli robot skręca w lewo, gdy wychylasz gałkę w prawo, zamień miejscami przewody silnika lewego i prawego (OUT1/2 ↔ OUT3/4) albo zamień piny lewej i prawej strony w menu ⚙ → Napęd.
 
-**Pełny ekran:** przycisk ⛶ obok ⚙ chowa pasek adresu i pasek systemu, a ekran obraca się do poziomu, nawet gdy trzymasz telefon pionowo. Działa w Chrome i Edge na Androidzie oraz na komputerze. W ⚙ → Przyciski możesz włączyć „Włączaj po pierwszym dotknięciu”, bo przeglądarka nie pozwala włączyć pełnego ekranu bez dotknięcia. Opcja „Obracaj ekran do poziomu” decyduje o obrocie. Oba ustawienia zapisują się osobno na każdym telefonie.
+**Pełny ekran:** przycisk ⛶ obok ⚙ chowa pasek adresu i pasek systemu, a ekran obraca się do poziomu, nawet gdy trzymasz telefon pionowo. Działa w Chrome i Edge na Androidzie oraz na komputerze. W ⚙ → Przyciski możesz włączyć „Włączaj po pierwszym dotknięciu”, bo przeglądarka nie pozwala włączyć pełnego ekranu bez dotknięcia. Opcja „Obracaj ekran do poziomu” decyduje o obrocie. Oba ustawienia zapisują się osobno na każdym telefonie. Jeśli telefon nie pozwala zablokować obrotu, np. iPhone albo strona otwarta w ramce, strona obraca cały obraz o 90°. Dotyk jest wtedy przeliczany, więc gałki działają normalnie.
 
 **iPhone:** Safari nie pozwala stronom na pełny ekran. Użyj Udostępnij → „Do ekranu początkowego”: strona otworzy się jak aplikacja, bez paska adresu.
 

@@ -19,6 +19,8 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 <style>
   :root{--R:85px;--K:76px}   /* zakres ruchu i rozmiar gałki – JS dopasowuje je do ekranu */
   [hidden]{display:none!important}
+  /* zapasowy obrót do poziomu, gdy telefon nie pozwala zablokować orientacji (iPhone, ramka) */
+  body.rot #app{position:fixed;top:0;transform-origin:0 0;transform:rotate(90deg);overflow:hidden}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
   html{color-scheme:dark}
   html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#fff;
@@ -163,6 +165,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 </style>
 </head>
 <body>
+<div id="app">
 <div id="nocam">brak obrazu z kamery</div>
 <img id="cam" alt="">
 
@@ -353,7 +356,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     <div class="grp"><label>Pełny ekran (ten telefon)</label>
       <div class="row"><label for="fsauto">Włączaj po pierwszym dotknięciu</label><input type="checkbox" id="fsauto"></div>
       <div class="row"><label for="fsland">Obracaj ekran do poziomu</label><input type="checkbox" id="fsland"></div>
-      <p class="note" id="fsnote">Przycisk ⛶ obok ⚙ chowa pasek adresu i pasek systemu. Działa w Chrome i Edge na Androidzie oraz na komputerze. Na iPhonie: Udostępnij → „Do ekranu początkowego” – strona otworzy się bez paska adresu.</p>
+      <p class="note" id="fsnote">Przycisk ⛶ obok ⚙ chowa pasek adresu i pasek systemu. Działa w Chrome i Edge na Androidzie oraz na komputerze. Jeśli telefon nie pozwala zablokować obrotu, strona obraca sam obraz o 90°. Na iPhonie: Udostępnij → „Do ekranu początkowego” – strona otworzy się bez paska adresu.</p>
     </div>
     <p class="note">Tu ustawiasz, co robi każdy z 8 przycisków. Na ekran dodajesz je w edytorze układu, tam też zmienisz ich położenie i rozmiar. Każdy można też wyzwalać przełącznikiem aparatury.</p>
     <div class="grp" id="acts"></div>
@@ -418,6 +421,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
 </div>
 <div id="hint" class="hud">WASD / strzałki · Q/E bokiem (Mecanum) · F światło</div>
 
+</div><!--app-->
 <script>
 (function(){
   var host = location.hostname || '192.168.4.1';
@@ -483,6 +487,13 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   var PRESETS = [ { fs: 0, q: 14 }, { fs: 2, q: 12 }, { fs: 3, q: 10 } ];   // Płynnie / Balans / Jakość
   tap('gear', function(){ menu.hidden = !menu.hidden; });
 
+  // ---------- współrzędne strony (przy zapasowym obrocie interfejsu o 90°) ----------
+  var rotated = false;
+  function P(e){ return rotated ? { x: e.clientY, y: window.innerWidth - e.clientX } : { x: e.clientX, y: e.clientY }; }
+  function C(r){ return P({ clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }); }   // środek elementu
+  function appW(){ return rotated ? window.innerHeight : window.innerWidth; }
+  function appH(){ return rotated ? window.innerWidth : window.innerHeight; }
+
   // ---------- pełny ekran ----------
   // Przeglądarka pozwala na pełny ekran i blokadę obrotu tylko po dotknięciu – stąd przycisk ⛶
   // albo opcja „po pierwszym dotknięciu”. Ustawienia są osobne dla każdego telefonu.
@@ -499,9 +510,27 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     var d = document.documentElement, p = fsPrefs(), r;
     try { r = d.requestFullscreen ? d.requestFullscreen({ navigationUI: 'hide' }) : d.webkitRequestFullscreen(); } catch (e) { r = Promise.reject(e); }
     Promise.resolve(r).then(function(){
-      if (p.land && screen.orientation && screen.orientation.lock) return screen.orientation.lock('landscape');
-    }).catch(function(){});
+      if (!p.land) return;
+      if (!screen.orientation || !screen.orientation.lock) throw new Error('brak blokady obrotu');
+      return screen.orientation.lock('landscape').then(function(){ rotFallback = false; updRot(); });
+    }).catch(function(){ rotFallback = true; updRot(); });   // np. iPhone albo strona w ramce – obracamy sam interfejs
   }
+  // Zapasowy obrót: cały interfejs obrócony o 90°, gdy telefon jest pionowo, a blokada orientacji nie zadziałała
+  var rotFallback = false;
+  function updRot(){
+    var on = !!fsPrefs().land && window.innerHeight > window.innerWidth &&
+             ((fsActive() && rotFallback) || standalone);
+    var a = document.getElementById('app');
+    a.style.width = on ? window.innerHeight + 'px' : '';
+    a.style.height = on ? window.innerWidth + 'px' : '';
+    a.style.left = on ? window.innerWidth + 'px' : '';
+    if (on !== rotated){
+      rotated = on;
+      document.body.classList.toggle('rot', on);
+      window.dispatchEvent(new Event('resize'));   // układ, kamera i gałki przeliczają się na nowe wymiary
+    }
+  }
+  window.addEventListener('resize', updRot);
   function exitFs(){
     if (screen.orientation && screen.orientation.unlock) try { screen.orientation.unlock(); } catch (e) {}
     if (document.exitFullscreen) document.exitFullscreen().catch(function(){});
@@ -512,6 +541,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     b.style.display = standalone || !fsSupported() ? 'none' : '';
     b.classList.toggle('on', fsActive());
     b.title = fsActive() ? 'Wyjdź z pełnego ekranu' : 'Pełny ekran';
+    updRot();
   }
   tap('fsb', function(){ fsActive() ? exitFs() : enterFs(); });
   document.addEventListener('fullscreenchange', fsUpdate);
@@ -524,7 +554,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
     var p = fsPrefs(), a = document.getElementById('fsauto'), l = document.getElementById('fsland');
     a.checked = !!p.auto; l.checked = !!p.land;
     a.addEventListener('change', function(){ var q = fsPrefs(); q.auto = a.checked ? 1 : 0; fsSave(q); });
-    l.addEventListener('change', function(){ var q = fsPrefs(); q.land = l.checked ? 1 : 0; fsSave(q); });
+    l.addEventListener('change', function(){ var q = fsPrefs(); q.land = l.checked ? 1 : 0; fsSave(q); updRot(); });
     if (standalone) document.getElementById('fsnote').textContent = 'Strona działa jako aplikacja z ekranu początkowego – pasek adresu jest już schowany.';
     else if (!fsSupported()) document.getElementById('fsnote').textContent = 'Ta przeglądarka nie pozwala stronom na pełny ekran. Na iPhonie: Udostępnij → „Do ekranu początkowego” – strona otworzy się bez paska adresu.';
     fsUpdate();
@@ -587,7 +617,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   function applyRotation(){
     var r = camS.rot || 0, st = cam.style;
     if (r === 90 || r === 270){
-      var w = window.innerWidth, h = window.innerHeight;
+      var w = appW(), h = appH();
       st.inset = 'auto'; st.width = h + 'px'; st.height = w + 'px';
       st.left = (w - h) / 2 + 'px'; st.top = (h - w) / 2 + 'px';
     } else {
@@ -641,7 +671,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   var lay = document.getElementById('lay'), layout = null, layCustom = false, editing = false, selIdx = null;
   var FX = [['none', 'brak'], ['turn', 'skręt / obrót'], ['strafe', 'jazda bokiem (Mecanum)'], ['pan', 'kamera – pan']];
   var FY = [['none', 'brak'], ['gas', 'gaz (przód / tył)'], ['tilt', 'kamera – tilt']];
-  function portrait(){ return window.innerHeight > window.innerWidth; }
+  function portrait(){ return appH() > appW(); }
   function items(){ return layout[portrait() ? 'port' : 'land']; }
   function unit(){ return Math.min(window.innerWidth, window.innerHeight) / 100; }
 
@@ -748,7 +778,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
   function bindStick(el, it, base, knob, g){
     var id = null, cx = 0, cy = 0, sent = 0;
     function move(e){
-      var dx = it.fx === 'none' ? 0 : e.clientX - cx, dy = it.fy === 'none' ? 0 : e.clientY - cy;
+      var q = P(e), dx = it.fx === 'none' ? 0 : q.x - cx, dy = it.fy === 'none' ? 0 : q.y - cy;
       var d = Math.sqrt(dx * dx + dy * dy);
       if (d > g.R){ dx = dx / d * g.R; dy = dy / d * g.R; d = g.R; }
       knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
@@ -762,15 +792,14 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       e.preventDefault();
       id = e.pointerId;
       try { el.setPointerCapture(id); } catch (err) {}
-      var r = el.getBoundingClientRect();
+      var c = C(el.getBoundingClientRect()), q = P(e);
       if (it.fl){                      // pływająca: środek pod palcem, ale tor zostaje w polu dotyku
-        var mx = r.width / 2 - g.R - g.K / 2, my = r.height / 2 - g.R - g.K / 2;
-        var ox = Math.max(-mx, Math.min(mx, e.clientX - (r.left + r.width / 2)));
-        var oy = Math.max(-my, Math.min(my, e.clientY - (r.top + r.height / 2)));
+        var mx = el.offsetWidth / 2 - g.R - g.K / 2, my = el.offsetHeight / 2 - g.R - g.K / 2;
+        var ox = Math.max(-mx, Math.min(mx, q.x - c.x)), oy = Math.max(-my, Math.min(my, q.y - c.y));
         base.style.left = 'calc(50% + ' + ox + 'px)';
         base.style.top = 'calc(50% + ' + oy + 'px)';
-        cx = r.left + r.width / 2 + ox; cy = r.top + r.height / 2 + oy;
-      } else { cx = r.left + r.width / 2; cy = r.top + r.height / 2; }
+        cx = c.x + ox; cy = c.y + oy;
+      } else { cx = c.x; cy = c.y; }
       move(e);
     });
     el.addEventListener('pointermove', function(e){ if (e.pointerId === id) move(e); });
@@ -869,7 +898,7 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       el.addEventListener('pointerdown', function(e){
         e.preventDefault(); e.stopPropagation();
         var idx = +el.dataset.idx, it = items()[idx];
-        eptr[e.pointerId] = { x: e.clientX, y: e.clientY };
+        eptr[e.pointerId] = P(e);
         try { el.setPointerCapture(e.pointerId); } catch (err) {}
         if (Object.keys(eptr).length === 2 && selIdx !== null){
           var p = Object.values(eptr);
@@ -877,12 +906,13 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
           edrag = null;
           return;
         }
-        edrag = { id: e.pointerId, idx: idx, sx: e.clientX, sy: e.clientY, x: it.x, y: it.y, moved: false };
+        var q0 = P(e);
+        edrag = { id: e.pointerId, idx: idx, sx: q0.x, sy: q0.y, x: it.x, y: it.y, moved: false };
         if (selIdx !== idx){ selIdx = idx; lay.querySelectorAll('.li').forEach(function(x){ x.classList.toggle('sel', x === el); }); renderPanel(); }
       });
       el.addEventListener('pointermove', function(e){
         if (!eptr[e.pointerId]) return;
-        eptr[e.pointerId] = { x: e.clientX, y: e.clientY };
+        eptr[e.pointerId] = P(e);
         if (epinch && Object.keys(eptr).length >= 2){
           var p = Object.values(eptr), d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
           items()[selIdx].s = Math.round(Math.max(6, Math.min(80, epinch.s * d / epinch.d)));
@@ -890,11 +920,11 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
           return;
         }
         if (!edrag || e.pointerId !== edrag.id) return;
-        var dx = e.clientX - edrag.sx, dy = e.clientY - edrag.sy;
+        var q1 = P(e), dx = q1.x - edrag.sx, dy = q1.y - edrag.sy;
         if (Math.abs(dx) + Math.abs(dy) > 4) edrag.moved = true;
         var it = items()[edrag.idx];
-        it.x = Math.round(Math.max(0, Math.min(100, edrag.x + dx / window.innerWidth * 100)) * 2) / 2;
-        it.y = Math.round(Math.max(0, Math.min(100, edrag.y + dy / window.innerHeight * 100)) * 2) / 2;
+        it.x = Math.round(Math.max(0, Math.min(100, edrag.x + dx / appW() * 100)) * 2) / 2;
+        it.y = Math.round(Math.max(0, Math.min(100, edrag.y + dy / appH() * 100)) * 2) / 2;
         el.style.left = it.x + '%';
         el.style.top = it.y + '%';
       });
@@ -1401,11 +1431,12 @@ static const char INDEX_HTML[] = R"rawliteral(<!doctype html>
       }
       lastTap = now;
       try { el.setPointerCapture(e.pointerId); } catch (err) {}
-      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, start: Object.assign({}, lookPos) };
+      var q = P(e);
+      drag = { id: e.pointerId, x: q.x, y: q.y, start: Object.assign({}, lookPos) };
     });
     el.addEventListener('pointermove', function(e){
       if (!drag || e.pointerId !== drag.id) return;
-      var dx = (e.clientX - drag.x) * LOOK_K, dy = (e.clientY - drag.y) * LOOK_K;
+      var q = P(e), dx = (q.x - drag.x) * LOOK_K, dy = (q.y - drag.y) * LOOK_K;
       lookServos(1).forEach(function(x){ lookPos[x.i] = Math.max(x.s.mn, Math.min(x.s.mx, drag.start[x.i] + dx)); });
       lookServos(2).forEach(function(x){ lookPos[x.i] = Math.max(x.s.mn, Math.min(x.s.mx, drag.start[x.i] - dy)); });
       if (Date.now() - sent > 40){ lookSend(hud); sent = Date.now(); }

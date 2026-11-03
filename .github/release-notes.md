@@ -4,6 +4,7 @@ Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu
 
 - **pełny ekran**: przycisk ⛶ obok ⚙ chowa pasek adresu i obraca ekran do poziomu (Chrome/Edge na Androidzie); opcja „Włączaj po pierwszym dotknięciu”
 - iPhone: „Do ekranu początkowego” otwiera stronę jak aplikację bez paska adresu (manifest i ikona)
+- gdy telefon nie pozwala zablokować obrotu (iPhone, strona w ramce), interfejs obraca się o 90° sam, a dotyk jest przeliczany
 
 ## Co nowego w v1.5.0
 
