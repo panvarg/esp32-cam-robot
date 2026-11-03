@@ -1,5 +1,10 @@
 Firmware dla robota na **ESP32-CAM (AI-Thinker) + L298N**: sterowanie z telefonu (dwie gałki na ekranie + podgląd z kamery) oraz opcjonalnie z aparatury ExpressLRS.
 
+## Co nowego w v1.5.2
+
+- edytor układu: pasek u góry w jednym rzędzie („+ Dodaj” rozwija listę), panel elementu jako boczny pasek po przeciwnej stronie niż wybrany element, pasek i panel znikają podczas przeciągania
+- poprawka czarnego ekranu na Androidzie przy zapasowym obrocie oraz poprawne rozmiary paska i panelu w obróconym widoku
+
 ## Co nowego w v1.5.1
 
 - **pełny ekran**: przycisk ⛶ obok ⚙ chowa pasek adresu i obraca ekran do poziomu (Chrome/Edge na Androidzie); opcja „Włączaj po pierwszym dotknięciu”
